@@ -1,0 +1,1 @@
+Dumping ground for <a href="https://samthor.au">@samthor</a>'s shared Go libraries that don't get their own package.
