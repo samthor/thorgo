@@ -1,4 +1,4 @@
-package httpmisc
+package shutdown
 
 import (
 	"context"
