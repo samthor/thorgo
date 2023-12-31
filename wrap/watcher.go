@@ -41,9 +41,9 @@ func (sw *serverWatcher) RegisterHttpContext(ctx context.Context) context.Contex
 			sw.lock.Lock()
 			defer sw.lock.Unlock()
 
-			// Don't log if there's none active
+			// only log if we had any active
 			if len(closers) != 0 {
-				log.Printf("shutdown killing %d active websocket", len(closers))
+				log.Printf("server shutdown killing %d active websocket", len(closers))
 				for closer := range closers {
 					(*closer)()
 				}
