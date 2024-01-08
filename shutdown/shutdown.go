@@ -7,6 +7,8 @@ import (
 	"time"
 )
 
+// LazyShutdown basically provides a context and HTTP server helpers which allow shutdown after inactivity.
+// This can be useful for hosting services whose running binary should naturally evict itself after some time.
 type LazyShutdown struct {
 	lock   sync.RWMutex
 	timer  *time.Timer
@@ -16,6 +18,7 @@ type LazyShutdown struct {
 	active int64
 }
 
+// New builds a new LazyShutdown.
 func New(wait time.Duration) *LazyShutdown {
 	ls := &LazyShutdown{
 		wait:   wait,
@@ -24,6 +27,8 @@ func New(wait time.Duration) *LazyShutdown {
 	}
 
 	go func() {
+		// This is a bit racey: the timer might be reset after already closed.
+		// But if it has, then even if new locks/requests are happening, this LazyShutdown is already considered to be dying, doneCh will be closed.
 		<-ls.timer.C
 		ls.lock.Lock()
 		defer ls.lock.Unlock()
@@ -80,7 +85,7 @@ func (ls *LazyShutdown) Serve(addr string, handler http.Handler) error {
 	return server.ListenAndServe()
 }
 
-// ServeWrap is as Serve, but ensures that all requests handled by this server prevent shutdown.
+// ServeWrap is as Serve, but ensures that _all_ requests handled by this server prevent shutdown.
 func (ls *LazyShutdown) ServeWrap(addr string, handler http.Handler) error {
 	if handler == nil {
 		handler = http.DefaultServeMux
@@ -113,12 +118,22 @@ func (ls *LazyShutdown) Done() <-chan struct{} {
 	return ls.doneCh
 }
 
+// IsDone immediately returns whether this is done.
+func (ls *LazyShutdown) IsDone() bool {
+	select {
+	case <-ls.doneCh:
+		return true
+	default:
+		return false
+	}
+}
+
 // Reset resets the timer on this LazyShutdown only if is free to fire.
 func (ls *LazyShutdown) Reset() {
 	ls.addLock(0)
 }
 
-// Lock prevents this LazyShutdown from firing.
+// Lock prevents this LazyShutdown from firing. This acts like a `sync.RWMutex`.
 func (ls *LazyShutdown) Lock() {
 	ls.addLock(1)
 }
@@ -133,11 +148,20 @@ func (ls *LazyShutdown) WaitDuration() time.Duration {
 	return ls.wait
 }
 
-// Wrap wraps a http.HandlerFunc such that this LazyShutdown will not close while it is active.
-func (ls *LazyShutdown) Wrap(fn http.HandlerFunc) http.HandlerFunc {
+// WrapFunc wraps a http.HandlerFunc such that this LazyShutdown will not close while it is active.
+func (ls *LazyShutdown) WrapFunc(fn http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ls.Lock()
 		defer ls.Unlock()
 		fn(w, r)
 	}
+}
+
+// Wrap wraps a http.Handler such that this LazyShutdown will not close while it is active.
+func (ls *LazyShutdown) Wrap(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ls.Lock()
+		defer ls.Unlock()
+		h.ServeHTTP(w, r)
+	})
 }

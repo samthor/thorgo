@@ -62,7 +62,8 @@ func (q *queueImpl[X]) Join(ctx context.Context) QueueListener[X] {
 		delete(q.subs, who)
 		q.trimEvents() // we can purge events
 
-		// wake up everyone - bad for large numbers of queue listeners, they all have to check if they're evicted
+		// wake up everyone
+		// TODO: bad for large numbers of queue listeners, they all have to check if they're evicted
 		q.cond.Broadcast()
 	}()
 
