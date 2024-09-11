@@ -62,6 +62,10 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if c.HtmlNotFoundPath != "" {
 			info, reader = c.Content.Get(c.HtmlNotFoundPath)
 		}
+		if info == nil {
+			// no 404 page available
+			info = &FileInfo{}
+		}
 	}
 
 	// copy headers (do direct, already canonicalized)
