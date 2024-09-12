@@ -1,18 +1,27 @@
 package zip
 
 import (
-	"net/http"
+	"context"
+	"os"
 	"testing"
-
-	"github.com/samthor/thorgo/static"
 )
 
 func TestXxx(t *testing.T) {
+	os.Remove("./test.zip")
 
-	zl := &ZipLoader{}
+	zl := &ZipLoader{
+		Local: "./test.zip",
+	}
 
-	http.Handle("whatever", zl)
+	var err error
 
-	var content static.Content = zl
-	content.Exists("/")
+	err = zl.Fetch(context.Background(), "https://storage.googleapis.com/hwhistlr.appspot.com/sites/locksrv.zip")
+	if err != nil {
+		t.Errorf("couldn't fetch locksrv: %v", err)
+	}
+
+	err = zl.Fetch(context.Background(), "https://storage.googleapis.com/hwhistlr.appspot.com/sites/locksrv.zip")
+	if err != nil {
+		t.Errorf("couldn't fetch locksrv: %v", err)
+	}
 }

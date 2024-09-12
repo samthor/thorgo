@@ -198,17 +198,16 @@ func (zl *ZipLoader) Update(r io.Reader, mtime time.Time) error {
 	}
 
 	// create cache first and THEN swap into place
-	log.Printf("building cache from tmpfile: %s", writeTo)
 	newCache, err := buildCache(writeTo)
 	if err != nil {
 		return err
 	}
+	log.Printf("zipLoader got new cache count=%d", len(newCache.Map))
 
 	// rename file under lock
 	zl.lock.Lock()
 	defer zl.lock.Unlock()
-
-	log.Printf("moving zip into location: %s => %s", writeTo, zl.Local)
+	log.Printf("zipLoader moving into location: %s => %s", writeTo, zl.Local)
 
 	err = os.Rename(writeTo, zl.Local)
 	if err != nil {
@@ -220,13 +219,12 @@ func (zl *ZipLoader) Update(r io.Reader, mtime time.Time) error {
 
 // Fetch fetches the zip at the given URL and swaps it in-place, replacing the current file.
 func (zl *ZipLoader) Fetch(ctx context.Context, url string) error {
-	log.Printf("getting zip from: %s", url)
-
 	var mtime time.Time
 	stat, _ := os.Stat(zl.Local)
 	if stat != nil {
 		mtime = stat.ModTime()
 	}
+	log.Printf("zipLoader fetch from: %s (mtime=%v)", url, mtime)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -244,7 +242,7 @@ func (zl *ZipLoader) Fetch(ctx context.Context, url string) error {
 	defer res.Body.Close()
 
 	if res.StatusCode == http.StatusNotModified {
-		log.Printf("got HTTP 304, skipping update")
+		log.Printf("zipLoader got HTTP 304, skipping update")
 		return nil
 	}
 
@@ -256,11 +254,10 @@ func (zl *ZipLoader) Fetch(ctx context.Context, url string) error {
 	if ct != "application/zip" {
 		return fmt.Errorf("unexpected Content-Type for %s: %s", url, ct)
 	}
-	log.Printf("got zip from remote: %s", url)
 
 	lastModified, _ := time.ParseInLocation(time.RFC1123, res.Header.Get("Last-Modified"), time.FixedZone("GMT", 0))
 	if !lastModified.IsZero() {
-		log.Printf("got last-modified from remote: %v", lastModified)
+		log.Printf("zipLoader got last-modified from remote: %v", lastModified)
 	}
 
 	return zl.Update(res.Body, lastModified)
