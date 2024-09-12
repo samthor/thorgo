@@ -1,6 +1,6 @@
 module github.com/samthor/thorgo
 
-go 1.21.5
+go 1.23.0
 
 require (
 	golang.org/x/net v0.19.0
