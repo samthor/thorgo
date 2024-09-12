@@ -29,14 +29,26 @@ func hashForFile(name string) string {
 	return out[2]
 }
 
-// ZipLoader allows serving website content from a remote zip file.
+// ZipLoader allows serving website content from a local zip file.
+// Local should be set as the local filename.
 type ZipLoader struct {
-	Url   string
 	Local string
+	lock  sync.RWMutex
+	cache *cacheState
+}
 
-	cache *CacheState
+// ServeHTTP allows uploading a zip file directly. This just accepts the file blindly.
+func (zl *ZipLoader) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	defer r.Body.Close()
 
-	lock sync.RWMutex
+	err := zl.Update(r.Body, time.Time{})
+	if err != nil {
+		fmt.Fprintf(w, "can't upload: %v", err)
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	fmt.Fprintf(w, "ok, uploaded")
 }
 
 type cacheEntry struct {
@@ -44,12 +56,12 @@ type cacheEntry struct {
 	info static.FileInfo
 }
 
-type CacheState struct {
+type cacheState struct {
 	Map  map[string]cacheEntry
 	When time.Time
 }
 
-func buildCache(p string) (*CacheState, error) {
+func buildCache(p string) (*cacheState, error) {
 	f, err := os.Open(p)
 	if err != nil {
 		return nil, err
@@ -100,7 +112,7 @@ func buildCache(p string) (*CacheState, error) {
 		}
 	}
 
-	return &CacheState{
+	return &cacheState{
 		When: stat.ModTime(),
 		Map:  out,
 	}, nil
@@ -134,6 +146,7 @@ func (zl *ZipLoader) Exists(path string) bool {
 	return ok
 }
 
+// Load sets up content from the local zip file.
 func (zl *ZipLoader) Load() (exists bool, err error) {
 	zl.lock.Lock()
 	defer zl.lock.Unlock()
@@ -148,6 +161,7 @@ func (zl *ZipLoader) Load() (exists bool, err error) {
 	return true, nil
 }
 
+// When indicates when the zip file was loaded from cache.
 func (zl *ZipLoader) When() time.Time {
 	zl.lock.RLock()
 	defer zl.lock.RUnlock()
@@ -163,30 +177,8 @@ func (zl *ZipLoader) Count() int {
 	return len(zl.cache.Map)
 }
 
-func (zl *ZipLoader) Update(ctx context.Context) error {
-	log.Printf("getting zip from: %s", zl.Url)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, zl.Url, nil)
-	if err != nil {
-		return err
-	}
-
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-
-	if res.StatusCode != 200 {
-		return fmt.Errorf("unexpected status for %s: %d", zl.Url, res.StatusCode)
-	}
-
-	ct := res.Header.Get("Content-Type")
-	if ct != "application/zip" {
-		return fmt.Errorf("unexpected Content-Type for %s: %s", zl.Url, ct)
-	}
-	log.Printf("got zip from remote: %s", zl.Url)
-
+// Update puts a zip from the given reader over the prior cached content.
+func (zl *ZipLoader) Update(r io.Reader, mtime time.Time) error {
 	writeTo := fmt.Sprintf("%s.tmp-%d", zl.Local, rand.Int())
 	defer os.Remove(writeTo)
 
@@ -194,13 +186,19 @@ func (zl *ZipLoader) Update(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(f, res.Body)
+	_, err = io.Copy(f, r)
+	f.Close() // we move this by filename later
 	if err != nil {
 		return err
 	}
 
-	log.Printf("building cache from local: %s", writeTo)
+	// don't check err for this
+	if !mtime.IsZero() {
+		os.Chtimes(writeTo, time.Time{}, mtime.In(time.UTC))
+	}
 
+	// create cache first and THEN swap into place
+	log.Printf("building cache from tmpfile: %s", writeTo)
 	newCache, err := buildCache(writeTo)
 	if err != nil {
 		return err
@@ -210,14 +208,60 @@ func (zl *ZipLoader) Update(ctx context.Context) error {
 	zl.lock.Lock()
 	defer zl.lock.Unlock()
 
-	log.Printf("moving zip into location: %s", zl.Local)
+	log.Printf("moving zip into location: %s => %s", writeTo, zl.Local)
 
 	err = os.Rename(writeTo, zl.Local)
 	if err != nil {
 		return err
 	}
 	zl.cache = newCache
-
-	log.Printf("done, cache updated :thumbsup:")
 	return nil
+}
+
+// Fetch fetches the zip at the given URL and swaps it in-place, replacing the current file.
+func (zl *ZipLoader) Fetch(ctx context.Context, url string) error {
+	log.Printf("getting zip from: %s", url)
+
+	var mtime time.Time
+	stat, _ := os.Stat(zl.Local)
+	if stat != nil {
+		mtime = stat.ModTime()
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	if !mtime.IsZero() {
+		// If-Modified-Since must be in "GMT" even though this is UTC
+		req.Header.Set("If-Modified-Since", mtime.In(time.FixedZone("GMT", 0)).Format(time.RFC1123))
+	}
+
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer res.Body.Close()
+
+	if res.StatusCode == http.StatusNotModified {
+		log.Printf("got HTTP 304, skipping update")
+		return nil
+	}
+
+	if res.StatusCode != http.StatusOK {
+		return fmt.Errorf("unexpected status for %s: %d", url, res.StatusCode)
+	}
+
+	ct := res.Header.Get("Content-Type")
+	if ct != "application/zip" {
+		return fmt.Errorf("unexpected Content-Type for %s: %s", url, ct)
+	}
+	log.Printf("got zip from remote: %s", url)
+
+	lastModified, _ := time.ParseInLocation(time.RFC1123, res.Header.Get("Last-Modified"), time.FixedZone("GMT", 0))
+	if !lastModified.IsZero() {
+		log.Printf("got last-modified from remote: %v", lastModified)
+	}
+
+	return zl.Update(res.Body, lastModified)
 }
