@@ -12,7 +12,8 @@ import (
 )
 
 var (
-	reHash = regexp.MustCompile(`([a-z0-9A-Z]{6,24})`)
+	// vite includes _ in the hashes
+	reHash = regexp.MustCompile(`([_a-z0-9A-Z]{6,24})`)
 )
 
 func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
