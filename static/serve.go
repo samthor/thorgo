@@ -114,6 +114,14 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			if cacheForever {
 				head.Set("Cache-Control", "public, max-age=7776000, immutable")
 			}
+
+			// add Server-Timing header to report hash (readable in JS)
+			if isHtml {
+				b, _ := json.Marshal(effectiveHash)
+				if len(b) != 0 {
+					head.Add("Server-Timing", fmt.Sprintf("$h;desc=%s", string(b)))
+				}
+			}
 		}
 	}
 
@@ -137,14 +145,6 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// if 404 (html or not) explicitly write header
 	if serve404 {
 		w.WriteHeader(http.StatusNotFound)
-	}
-
-	// add Server-Timing header to report hash
-	if effectiveHash != "" && isHtml {
-		b, _ := json.Marshal(effectiveHash)
-		if len(b) != 0 {
-			head.Add("Server-Timing", fmt.Sprintf("$h;desc=%s", string(b)))
-		}
 	}
 
 	if r.Method == "HEAD" || reader == nil {
