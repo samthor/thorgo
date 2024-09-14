@@ -1,19 +1,14 @@
 package static
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
 	"mime"
 	"net/http"
 	"path/filepath"
-	"regexp"
 	"strings"
-)
-
-var (
-	// vite includes _ in the hashes
-	reHash = regexp.MustCompile(`([_a-z0-9A-Z]{6,24})`)
 )
 
 func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -38,7 +33,11 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	p = strings.TrimPrefix(p, "/")
 
-	info, reader := c.Content.Get(p)
+	var info *FileInfo
+	var reader io.Reader
+	if c.Content != nil {
+		info, reader = c.Content.Get(p)
+	}
 	if info == nil && !endsWithSlash {
 		checkP := strings.TrimPrefix(p+"/index.html", "/")
 
@@ -89,25 +88,34 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	isHtml := ct == "text/html" || strings.HasPrefix(ct, "text/html;")
 
-	// include Etag if we have one
+	// determine if there's a hash we need: query/filename 'wins' over content
+	var effectiveHash string
+	var notModified bool
 	cacheForever := false
-	if info.Hash != "" && !serve404 {
-		head.Set("ETag", info.Hash)
-		if !info.ContentHash {
+
+	if !serve404 {
+		effectiveHash = info.ContentHash
+		if queryHash := GetQueryHash(r.URL.RawQuery); queryHash != "" {
+			effectiveHash = queryHash
 			cacheForever = true
+		} else if fileHash := GetFileHash(r.URL.Path); fileHash != "" {
+			effectiveHash = queryHash
+			cacheForever = true
+		} else if effectiveHash == "" {
+			// TODO: calculate hash based on content?
+		}
+
+		// write the etag
+		if effectiveHash != "" {
+			head.Set("ETag", effectiveHash)
+			notModified = r.Header.Get("If-None-Match") == effectiveHash
+
+			// we had a url-based-hash, cache forever
+			if cacheForever {
+				head.Set("Cache-Control", "public, max-age=7776000, immutable")
+			}
 		}
 	}
-
-	// if we have a query-string that looks like a hash only (i.e., no & etc) then cache forever
-	if !serve404 && !cacheForever && r.URL.RawQuery != "" && reHash.MatchString(r.URL.RawQuery) {
-		cacheForever = true
-	}
-
-	if cacheForever {
-		head.Set("Cache-Control", "public, max-age=7776000, immutable")
-	}
-
-	isNoneMatch := !serve404 && info.Hash != "" && r.Header.Get("If-None-Match") == info.Hash
 
 	if c.UpdateHeader != nil {
 		c.UpdateHeader(head, ServeInfo{
@@ -115,13 +123,13 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Is404:        serve404,
 			IsHtml:       isHtml,
 			IsHead:       r.Method == http.MethodHead,
-			IfNoneMatch:  isNoneMatch,
+			NotModified:  notModified,
 			CacheForever: cacheForever,
 		})
 	}
 
-	// check etag
-	if isNoneMatch {
+	// short-circuit if etag matched
+	if notModified {
 		w.WriteHeader(http.StatusNotModified)
 		return
 	}
@@ -135,6 +143,14 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return // don't serve bytes
 	}
 
+	// add Server-Timing header to report hash
+	if effectiveHash != "" && isHtml {
+		b, _ := json.Marshal(effectiveHash)
+		if len(b) != 0 {
+			w.Header().Add("Server-Timing", fmt.Sprintf("$h;desc=%s", string(b)))
+		}
+	}
+
 	_, err := io.Copy(w, reader)
 	if err != nil {
 		log.Printf("couldn't write bytes: p=%v %v", p, err)
@@ -142,10 +158,8 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// add etag to html entrypoints
-	if info.ContentHash && info.Hash != "" {
-		if isHtml {
-			fmt.Fprintf(w, "<!--:%s:-->\n", info.Hash)
-		}
+	// add secret HTML comment for hash validation
+	if c.InsertHtmlHash && effectiveHash != "" && isHtml {
+		fmt.Fprintf(w, "<!--:%s:-->\n", effectiveHash)
 	}
 }

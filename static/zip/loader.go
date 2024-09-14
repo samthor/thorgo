@@ -10,24 +10,11 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
-	"regexp"
 	"sync"
 	"time"
 
 	"github.com/samthor/thorgo/static"
 )
-
-var (
-	reFileHash = regexp.MustCompile(`(-|\.)([a-z0-9A-Z]{6,24})\.`)
-)
-
-func hashForFile(name string) string {
-	out := reFileHash.FindStringSubmatch(name)
-	if out == nil {
-		return ""
-	}
-	return out[2]
-}
 
 // ZipLoader allows serving website content from a local zip file.
 // Local should be set as the local filename.
@@ -97,13 +84,9 @@ func buildCache(p string) (*cacheState, error) {
 
 		var info static.FileInfo
 
-		// find optional hash in filename
-		info.Hash = hashForFile(file.Name)
-		if info.Hash == "" {
-			info.ContentHash = true
-			if file.CRC32 != 0 {
-				info.Hash = fmt.Sprintf("%08x", file.CRC32)
-			}
+		// produce optional content hash
+		if file.CRC32 != 0 {
+			info.ContentHash = fmt.Sprintf("%08x", file.CRC32)
 		}
 
 		out[file.Name] = cacheEntry{

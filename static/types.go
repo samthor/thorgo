@@ -7,10 +7,8 @@ import (
 
 // FileInfo is returned from Content.
 type FileInfo struct {
-	Hash string
-
-	// Is this Hash purely from the file's contents. If false, and Hash is set, is from the filename.
-	ContentHash bool
+	// Any available hash from the file's contents, or CRC or something.
+	ContentHash string
 
 	// ContentType if known.
 	ContentType string
@@ -25,7 +23,7 @@ type ServeInfo struct {
 	Is404        bool
 	IsHtml       bool
 	IsHead       bool
-	IfNoneMatch  bool
+	NotModified  bool // did the client match the prior ETag
 	CacheForever bool
 }
 
@@ -47,6 +45,9 @@ type ServeFs struct {
 
 	// HtmlNotFoundPath is loaded from Content if we think this is a missing page (with a trailing slash). It does not have AddPrefix applied to it.
 	HtmlNotFoundPath string
+
+	// InsertHtmlHash controls whether a short `<!--:<hash>:-->` is added to each served HTML page.
+	InsertHtmlHash bool
 
 	// UpdateHeader may be provided to update the headers of returned responses. Useful for CSP.
 	UpdateHeader func(http.Header, ServeInfo)
