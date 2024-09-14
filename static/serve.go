@@ -99,7 +99,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			effectiveHash = queryHash
 			cacheForever = true
 		} else if fileHash := GetFileHash(r.URL.Path); fileHash != "" {
-			effectiveHash = queryHash
+			effectiveHash = fileHash
 			cacheForever = true
 		} else if effectiveHash == "" {
 			// TODO: calculate hash based on content?
@@ -139,16 +139,16 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 	}
 
-	if r.Method == "HEAD" || reader == nil {
-		return // don't serve bytes
-	}
-
 	// add Server-Timing header to report hash
 	if effectiveHash != "" && isHtml {
 		b, _ := json.Marshal(effectiveHash)
 		if len(b) != 0 {
-			w.Header().Add("Server-Timing", fmt.Sprintf("$h;desc=%s", string(b)))
+			head.Add("Server-Timing", fmt.Sprintf("$h;desc=%s", string(b)))
 		}
+	}
+
+	if r.Method == "HEAD" || reader == nil {
+		return // don't serve bytes
 	}
 
 	_, err := io.Copy(w, reader)
