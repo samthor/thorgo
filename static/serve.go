@@ -17,25 +17,26 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	serve404 := false
+
 	var endsWithSlash bool
 	p := c.AddPrefix + r.URL.Path
-	if strings.HasSuffix(p, "/index.html") {
+	if strings.HasSuffix(p, ".html") {
 		// don't support direct loading
-		w.WriteHeader(http.StatusNotFound)
-		return
-	}
-
-	head := w.Header()
-
-	if strings.HasSuffix(p, "/") {
+		serve404 = true
+	} else if strings.HasSuffix(p, "/") {
+		// ... but we _look_ for "/index.html"
 		p += "index.html"
 		endsWithSlash = true
 	}
 	p = strings.TrimPrefix(p, "/")
 
+	head := w.Header()
+
 	var info *FileInfo
 	var reader io.Reader
-	if c.Content != nil {
+	if !serve404 && c.Content != nil {
+		// guard reading content if we had a "bad url" (i.e., ends with "/index.html")
 		info, reader = c.Content.Get(p)
 	}
 	if info == nil && !endsWithSlash {
@@ -48,12 +49,22 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusSeeOther)
 			return
 		}
+
+		if c.ServeNakedHtml {
+			info, reader = c.Content.Get(p + ".html")
+		}
 	}
 
-	serve404 := false
 	if info == nil {
-		if !endsWithSlash {
-			// not inferred as a HTML page
+		ext := filepath.Ext(r.URL.Path) // original ext
+		if c.ServeNakedHtml {
+			if ext != "" {
+				// not inferred as a HTML page, "blah.css" or even "test.html"
+				w.WriteHeader(http.StatusNotFound)
+				return
+			}
+		} else if !endsWithSlash {
+			// not inferred as a HTML page (needs slash)
 			w.WriteHeader(http.StatusNotFound)
 			return
 		}
@@ -134,6 +145,10 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			NotModified:  notModified,
 			CacheForever: cacheForever,
 		})
+		if etag := head.Get("ETag"); etag != "" && r.Header.Get("If-None-Match") == etag {
+			// maybe UpdateHeader set ETag
+			notModified = true
+		}
 	}
 
 	// short-circuit if etag matched

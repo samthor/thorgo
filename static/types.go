@@ -40,6 +40,10 @@ type ServeFs struct {
 	// AddPrefix is added to all paths before being checked inside Content.
 	AddPrefix string
 
+	// Normally, no files "foo.html" are served. This allows them to be served at "foo", without a trailing slash.
+	// If "foo.html" AND "foo/index.html" exist, only the latter will be served.
+	ServeNakedHtml bool
+
 	// AllowFrame controls the X-Frame-Options header.
 	AllowFrame bool
 
