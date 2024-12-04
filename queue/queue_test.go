@@ -50,3 +50,49 @@ func TestQueue(t *testing.T) {
 
 	time.Sleep(time.Millisecond * 10)
 }
+
+func TestPeek(t *testing.T) {
+	q := New[int]()
+
+	l := q.Join(context.Background())
+
+	var value int
+	var ok bool
+
+	value, ok = l.Peek()
+	if ok {
+		t.Errorf("got value when initially peeking: %v", value)
+	}
+
+	q.Push(123)
+	value, ok = l.Peek()
+	if value != 123 || !ok {
+		t.Errorf("got unexpected value when peeking: %v", value)
+	}
+
+	q.Push(456)
+	value, ok = l.Peek() // should be same
+	if value != 123 || !ok {
+		t.Errorf("got unexpected value when peeking: %v", value)
+	}
+
+	value, ok = l.Next()
+	if value != 123 || !ok {
+		t.Errorf("got unexpected value when fetching 1/2: %v", value)
+	}
+
+	value, ok = l.Peek()
+	if value != 456 || !ok {
+		t.Errorf("got unexpected value when peeking: %v", value)
+	}
+
+	value, ok = l.Next()
+	if value != 456 || !ok {
+		t.Errorf("got unexpected value when fetching 2/2: %v", value)
+	}
+
+	value, ok = l.Peek()
+	if ok {
+		t.Errorf("got value when peeking at end: %v", value)
+	}
+}

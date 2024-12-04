@@ -46,7 +46,7 @@ func (q *queueImpl[X]) Push(all ...X) bool {
 	return q.trimEvents()
 }
 
-func (q *queueImpl[X]) Join(ctx context.Context) QueueListener[X] {
+func (q *queueImpl[X]) Join(ctx context.Context) Listener[X] {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -133,13 +133,27 @@ type queueListener[X any] struct {
 	who int
 }
 
-func (ql *queueListener[X]) Batch() []X {
-	var out []X
-	ql.q.wait(ql.who, func(avail []X) int {
-		out = avail
-		return len(avail)
-	})
-	return out
+func (ql *queueListener[X]) Peek() (out X, ok bool) {
+	q := ql.q
+
+	q.cond.L.Lock()
+	defer q.cond.L.Unlock()
+
+	var last int
+	last, ok = q.subs[ql.who]
+	if !ok {
+		return
+	}
+
+	ok = last < q.head
+	if !ok {
+		return
+	}
+
+	start := q.head - len(q.events)
+	skip := last - start
+	out = q.events[skip]
+	return
 }
 
 func (ql *queueListener[X]) Next() (out X, ok bool) {
@@ -149,4 +163,13 @@ func (ql *queueListener[X]) Next() (out X, ok bool) {
 		return 1
 	})
 	return out, ok
+}
+
+func (ql *queueListener[X]) Batch() []X {
+	var out []X
+	ql.q.wait(ql.who, func(avail []X) int {
+		out = avail
+		return len(avail)
+	})
+	return out
 }

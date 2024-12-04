@@ -12,15 +12,20 @@ type Queue[X any] interface {
 
 	// Join returns a listener that provides all events passed with Push after this call completes.
 	// If the context is cancelled, the listener becomes invalid and returns no/empty values.
-	Join(ctx context.Context) QueueListener[X]
+	Join(ctx context.Context) Listener[X]
 }
 
-type QueueListener[X any] interface {
+type Listener[X any] interface {
+	// Peek determines if there's a pending queue event, returning it if available.
+	// This returns the zero X and false if there is no event or this listener is invalid.
+	// It does not consume the event.
+	Peek() (X, bool)
+
 	// Next waits for and returns the next queue event.
 	// It returns the zero X and false if this listener is invalid/cancelled context.
 	Next() (X, bool)
 
 	// Batch waits for and returns a slice of all available queue events.
-	// If the slice has zero-length, this listener is invalid/cancelled context.
+	// If the returned slice is nil or has zero length, this listener is invalid/cancelled context.
 	Batch() []X
 }
