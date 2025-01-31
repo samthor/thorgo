@@ -8,7 +8,7 @@ import (
 	"log"
 	"net/http"
 
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 var (
@@ -20,6 +20,7 @@ var (
 var WebSocketAcceptOptions = websocket.AcceptOptions{}
 
 // HttpFunc is a handler used by Http which allows generating simple result types.
+// Return nil to skip the built-in behavior.
 type HttpFunc func(http.ResponseWriter, *http.Request) interface{}
 
 // Http returns a http.HandlerFunc that wraps a HttpFunc capable of convenient return types.
@@ -63,7 +64,7 @@ type WebSocketFunc func(context.Context, *websocket.Conn) error
 // WebSocket returns a http.HandlerFunc that wraps a websocket setup/teardown.
 func WebSocket(fn WebSocketFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		c, err := websocket.Accept(w, r, &WebSocketAcceptOptions)
+		conn, err := websocket.Accept(w, r, &WebSocketAcceptOptions)
 		if err != nil {
 			log.Printf("got err setting up websocket %s: %v", r.URL.Path, err)
 			w.WriteHeader(http.StatusBadRequest)
@@ -71,14 +72,14 @@ func WebSocket(fn WebSocketFunc) http.HandlerFunc {
 		}
 
 		ctx := sw.RegisterHttpContext(r.Context())
-		err = fn(ctx, c)
+		err = fn(ctx, conn)
 
 		var closeError websocket.CloseError
-		if errors.Is(err, context.Canceled) || errors.As(err, &closeError) {
-			c.Close(websocket.StatusNormalClosure, "")
+		if err == nil || errors.Is(err, context.Canceled) || errors.As(err, &closeError) {
+			conn.Close(websocket.StatusNormalClosure, "")
 		} else {
 			log.Printf("got err handling websocket %s: %v", r.URL.Path, err)
-			c.Close(websocket.StatusInternalError, "")
+			conn.Close(websocket.StatusInternalError, "")
 		}
 	}
 }

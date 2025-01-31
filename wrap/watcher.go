@@ -55,13 +55,12 @@ func (sw *serverWatcher) RegisterHttpContext(ctx context.Context) context.Contex
 	ctx, cancel := context.WithCancel(ctx)
 	closers[&cancel] = struct{}{}
 
-	go func() {
+	context.AfterFunc(ctx, func() {
 		// when context is done (normally or not), cleanup closer
-		<-ctx.Done()
 		sw.lock.Lock()
 		defer sw.lock.Unlock()
 		delete(closers, &cancel)
-	}()
+	})
 
 	return ctx
 }
