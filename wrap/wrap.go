@@ -15,10 +15,6 @@ var (
 	sw serverWatcher
 )
 
-// WebSocketAcceptOptions are the default options applied to WebSocket.
-// You may want to set InsecureSkipVerify if you are being lazy/don't care about hosts.
-var WebSocketAcceptOptions = websocket.AcceptOptions{}
-
 // HttpFunc is a handler used by Http which allows generating simple result types.
 // Return nil to skip the built-in behavior.
 type HttpFunc func(http.ResponseWriter, *http.Request) interface{}
@@ -62,9 +58,9 @@ func Http(fn HttpFunc) http.HandlerFunc {
 type WebSocketFunc func(context.Context, *websocket.Conn) error
 
 // WebSocket returns a http.HandlerFunc that wraps a websocket setup/teardown.
-func WebSocket(fn WebSocketFunc) http.HandlerFunc {
+func WebSocket(fn WebSocketFunc, options *websocket.AcceptOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, &WebSocketAcceptOptions)
+		conn, err := websocket.Accept(w, r, options)
 		if err != nil {
 			log.Printf("got err setting up websocket %s: %v", r.URL.Path, err)
 			w.WriteHeader(http.StatusBadRequest)
