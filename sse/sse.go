@@ -1,4 +1,4 @@
-// Package see helps you send Sever-Sent Event streams over HTTP.
+// Package sse helps you send Sever-Sent Event streams over HTTP.
 package sse
 
 import (
@@ -64,7 +64,7 @@ func internalWrite(w io.Writer, m *Message) error {
 			// add empty comment
 			fmt.Fprint(w, ":\n")
 		}
-		fmt.Fprint(w, "\n\n")
+		fmt.Fprint(w, "\n")
 
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
@@ -88,7 +88,7 @@ func internalWrite(w io.Writer, m *Message) error {
 	}
 
 	if m.ID != "" {
-		_, err = fmt.Fprintf(w, "id: %s\n", m.Event)
+		_, err = fmt.Fprintf(w, "id: %s\n", m.ID)
 		if err != nil {
 			return err
 		}
