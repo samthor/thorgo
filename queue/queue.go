@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"iter"
 	"sync"
 )
 
@@ -172,4 +173,18 @@ func (ql *queueListener[X]) Batch() []X {
 		return len(avail)
 	})
 	return out
+}
+
+func (ql *queueListener[X]) Iter() iter.Seq[X] {
+	return func(yield func(X) bool) {
+		for {
+			next, ok := ql.Next()
+			if !ok {
+				return
+			}
+			if !yield(next) {
+				return
+			}
+		}
+	}
 }

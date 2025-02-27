@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"iter"
 )
 
 type Queue[X any] interface {
@@ -28,4 +29,7 @@ type Listener[X any] interface {
 	// Batch waits for and returns a slice of all available queue events.
 	// If the returned slice is nil or has zero length, this listener is invalid/cancelled context.
 	Batch() []X
+
+	// Iter returns an iterator that internally calls Next.
+	Iter() iter.Seq[X]
 }
