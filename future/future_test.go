@@ -12,7 +12,7 @@ func TestFuture(t *testing.T) {
 	nestedCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	f, resolve := NewFuture[int]()
+	f, resolve := New[int]()
 
 	go func() {
 		cancel()
