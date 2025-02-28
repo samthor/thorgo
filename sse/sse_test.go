@@ -11,7 +11,7 @@ func TestComment(t *testing.T) {
 	m := Message{
 		Comment: "Hey\nNerds\nWhat",
 	}
-	expected := ": Hey\n: Nerds\n: What\n\n\n"
+	expected := ": Hey\n: Nerds\n: What\n\n"
 
 	count, err := m.WriteTo(b)
 	if err != nil {
@@ -42,7 +42,7 @@ func TestJSON(t *testing.T) {
 	}
 	Write(b, m)
 
-	if expected := "data: {\"X\":123,\"Y\":\"\"}\n\n\n"; b.String() != expected {
+	if expected := "data: {\"X\":123,\"Y\":\"\"}\n\n"; b.String() != expected {
 		t.Errorf("bad JSON, got: %v wanted %v", b.String(), expected)
 	}
 }
