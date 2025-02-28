@@ -3,16 +3,12 @@ package wrap
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
 	"log"
 	"net/http"
 
 	"github.com/coder/websocket"
-)
-
-var (
-	sw serverWatcher
+	"github.com/samthor/thorgo/transport"
 )
 
 // HttpFunc is a handler used by Http which allows generating simple result types.
@@ -54,28 +50,19 @@ func Http(fn HttpFunc) http.HandlerFunc {
 	}
 }
 
-// WebSocketFunc is a handler used in WebSocket.
-type WebSocketFunc func(context.Context, *websocket.Conn) error
-
-// WebSocket returns a http.HandlerFunc that wraps a websocket setup/teardown.
-func WebSocket(fn WebSocketFunc, options *websocket.AcceptOptions) http.HandlerFunc {
+// WebSocketTransport returns a http.HandlerFunc that wraps a websocket setup/teardown into a transport.Transport.
+func WebSocketTransport(fn func(t transport.Transport) error, options *websocket.AcceptOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, options)
+		sock, err := websocket.Accept(w, r, options)
 		if err != nil {
 			log.Printf("got err setting up websocket %s: %v", r.URL.Path, err)
 			w.WriteHeader(http.StatusBadRequest)
 			return
 		}
 
-		ctx := sw.RegisterHttpContext(r.Context())
-		err = fn(ctx, conn)
-
-		var closeError websocket.CloseError
-		if err == nil || errors.Is(err, context.Canceled) || errors.As(err, &closeError) {
-			conn.Close(websocket.StatusNormalClosure, "")
-		} else {
-			log.Printf("got err handling websocket %s: %v", r.URL.Path, err)
-			conn.Close(websocket.StatusInternalError, "")
-		}
+		ctx, cancel := context.WithCancelCause(r.Context())
+		t := transport.SocketJSON(ctx, sock)
+		err = fn(t)
+		cancel(err)
 	}
 }

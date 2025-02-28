@@ -1,4 +1,4 @@
-package wrap
+package internal
 
 import (
 	"context"
@@ -14,9 +14,24 @@ type serverWatcher struct {
 	byServer map[*http.Server]map[*context.CancelFunc]struct{}
 }
 
+var (
+	sw serverWatcher
+)
+
+// RegisterHttpContext returns a derived context that is cancelled once the server shuts down.
+// It's needed only for hijacked connections.
+func RegisterHttpContext(ctx context.Context) context.Context {
+	return sw.RegisterHttpContext(ctx)
+}
+
 // RegisterHttpContext returns a derived context that is cancelled once the server shuts down.
 // It's needed only for hijacked connections.
 func (sw *serverWatcher) RegisterHttpContext(ctx context.Context) context.Context {
+	prev := ctx.Value(sw)
+	if prev != nil {
+		return ctx
+	}
+
 	server, ok := ctx.Value(http.ServerContextKey).(*http.Server)
 	if !ok {
 		return ctx
@@ -62,5 +77,5 @@ func (sw *serverWatcher) RegisterHttpContext(ctx context.Context) context.Contex
 		delete(closers, &cancel)
 	})
 
-	return ctx
+	return context.WithValue(ctx, sw, true)
 }
