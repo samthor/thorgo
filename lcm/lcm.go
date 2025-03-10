@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/samthor/thorgo/future"
+	"golang.org/x/sync/errgroup"
 )
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
@@ -117,6 +118,8 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 		resolve(out, err)
 
 		if err == nil {
+			s.startTasks()
+
 			select {
 			case <-gt.Done():
 				// timeout because users bailed
@@ -126,14 +129,19 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 				//   2. the runnable object killed itself
 				err = context.Cause(runCtx)
 			}
+
+			// signal tasks; wait for all to be done
+			close(s.taskCh)
+			s.taskGroup.Wait()
+
 			log.Printf("done key=%+v err=%+v", key, err) // err may be nil here
 
 			if err == nil {
-				err = s.runAfterTasks()
+				err = s.runAfter()
 			}
 
-			cancel(err)
-			log.Printf("shutdown key=%+v err=%+v", key, err) // err may be nil here, but the ctx is cancelled
+			cancel(err) // make sure run context is dead now, even with nil err
+			log.Printf("shutdown key=%+v err=%+v", key, err)
 		}
 
 		// delete ourselves from map
@@ -151,8 +159,13 @@ type statusImpl struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
 
-	lock       sync.Mutex
-	afterTasks []*afterStatus
+	taskLock  sync.Mutex
+	tasks     []TaskFunc
+	taskCh    chan struct{}
+	taskGroup errgroup.Group
+
+	lock  sync.Mutex
+	after []*afterStatus
 }
 
 type afterStatus struct {
@@ -160,18 +173,18 @@ type afterStatus struct {
 	fn   func() error
 }
 
-// runAfterTasks runs all tasks on this instance of Status, stopping early if any return a non-nil error.
+// runAfter runs all tasks on this instance of Status, stopping early if any return a non-nil error.
 // Tasks may continue to be added during this, in which case they'll also be run.
-func (s *statusImpl) runAfterTasks() error {
+func (s *statusImpl) runAfter() error {
 	var i int
 	for {
 		s.lock.Lock()
-		if i == len(s.afterTasks) {
+		if i == len(s.after) {
 			s.lock.Unlock()
 			break
 		}
 
-		next := s.afterTasks[i]
+		next := s.after[i]
 		s.lock.Unlock()
 		i++
 
@@ -192,12 +205,52 @@ func (s *statusImpl) Context() context.Context {
 	return s.ctx
 }
 
+func (s *statusImpl) startTasks() {
+	s.taskLock.Lock()
+	defer s.taskLock.Unlock()
+
+	taskCh := make(chan struct{})
+	s.taskCh = taskCh
+
+	for _, t := range s.tasks {
+		s.alwaysStartTask(t)
+	}
+	s.tasks = nil
+}
+
+func (s *statusImpl) alwaysStartTask(fn TaskFunc) {
+	s.taskGroup.Go(func() error {
+		err := fn(s.taskCh)
+		if err != nil {
+			s.cancel(err)
+		}
+		return err
+	})
+}
+
+func (s *statusImpl) Task(fn TaskFunc) {
+	s.taskLock.Lock()
+	defer s.taskLock.Unlock()
+
+	if s.taskCh == nil {
+		s.tasks = append(s.tasks, fn)
+		return
+	}
+
+	select {
+	case <-s.taskCh:
+		return
+	default:
+	}
+	s.alwaysStartTask(fn)
+}
+
 func (s *statusImpl) After(fn func() error) (stop func() bool) {
 	a := &afterStatus{fn: fn}
 
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	s.afterTasks = append(s.afterTasks, a)
+	s.after = append(s.after, a)
 
 	return func() (stopped bool) {
 		a.once.Do(func() { stopped = true })

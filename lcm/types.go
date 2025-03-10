@@ -19,6 +19,12 @@ type Manager[Key comparable, Object any] interface {
 type Status interface {
 	Context() context.Context
 
+	// Task creates an immediate task that is started in a goroutine after the object is successfully created.
+	// It will be deferred until the builder function first returns (or not called if this errors).
+	// If/when it returns a non-nil error, this managed object will be cancelled.
+	// After cleanups wait for all tasks to return before starting.
+	Task(TaskFunc)
+
 	// After registers a shutdown function to run after this Status completes.
 	// These functions will only be called in normal shutdown; if the runnable [context.Context] is cancelled, they will not be called.
 	// Additionally, if any function returns a non-nil error, no further shutdown functions will run.
@@ -35,3 +41,5 @@ type Status interface {
 
 // BuildFunc can build a managed object, or fail immediately.
 type BuildFunc[Key comparable, Object any] func(Key, Status) (Object, error)
+
+type TaskFunc func(stop <-chan struct{}) error

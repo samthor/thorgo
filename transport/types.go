@@ -11,7 +11,7 @@ type Transport interface {
 	Read(any) error
 
 	// Send sends the given message.
-	// This may block, or not, and may always return nil (e.g., message put into queue).
+	// This may block, or not, and may always return nil (e.g., message put into queue rather than sent directly).
 	Send(any) error
 
 	// Context returns a context which is Done when the underlying connection has closed.

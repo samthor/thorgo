@@ -176,3 +176,42 @@ func TestManagerDie(t *testing.T) {
 		t.Errorf("bad err returned: %v", context.Cause(ctx))
 	}
 }
+
+func TestTask(t *testing.T) {
+	var taskWaitingToStop bool
+	var afterCalled bool
+	releaseCh := make(chan struct{})
+
+	m := NewWithContext(t.Context(), func(b string, s Status) (string, error) {
+		s.After(func() error {
+			afterCalled = true
+			return nil
+		})
+
+		s.Task(func(stop <-chan struct{}) error {
+			<-stop
+			taskWaitingToStop = true
+			<-releaseCh
+			return nil
+		})
+
+		return "_" + b, nil
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	m.Run(ctx, "x")
+	cancel()
+
+	// TODO: timeout tests are bad juju but they work for now
+
+	time.Sleep(time.Millisecond * 4)
+	if !taskWaitingToStop || afterCalled {
+		t.Errorf("should be waiting but not done")
+	}
+
+	close(releaseCh)
+	time.Sleep(time.Millisecond * 4)
+	if !afterCalled {
+		t.Errorf("should be done")
+	}
+}
