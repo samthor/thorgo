@@ -6,6 +6,13 @@ import (
 	"time"
 )
 
+type GroupTimer interface {
+	// Join returns true if a change was made, or false if the timer had already expired.
+	Join(context.Context) bool
+	// Done returns a channel which is closed when the the last context is done and the timer has expired.
+	Done() <-chan struct{}
+}
+
 type groupTimer struct {
 	timeout time.Duration
 	doneCh  chan struct{}
@@ -14,13 +21,6 @@ type groupTimer struct {
 	active    int
 	seq       int
 	stopTimer func() bool
-}
-
-type GroupTimer interface {
-	// Join returns true if a change was made, or false if the timer had already expired.
-	Join(context.Context) bool
-	// Done returns a channel which is closed when the the last context is done and the timer has expired.
-	Done() <-chan struct{}
 }
 
 // NewGroupTimer builds a timer that expires in the passed duration after the last context joined is done.
@@ -33,7 +33,9 @@ func NewGroupTimer(t time.Duration, ctx context.Context) GroupTimer {
 		stopTimer: func() bool { return false },
 	}
 
-	gt.Join(ctx)
+	if !gt.Join(ctx) {
+		panic("could not initial join GroupTimer")
+	}
 	return gt
 }
 
@@ -75,7 +77,7 @@ func (gt *groupTimer) contextDone() {
 	timer := time.AfterFunc(gt.timeout, func() {
 		gt.lock.Lock()
 		defer gt.lock.Unlock()
-		if localSeq != gt.seq {
+		if localSeq != gt.seq || gt.active != 0 {
 			return // sanity check in case something weird happened
 		}
 

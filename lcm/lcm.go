@@ -36,9 +36,8 @@ type managerImpl[Key comparable, Object any] struct {
 }
 
 type managerInfo[Object any] struct {
-	future future.Future[Object]
-	ctx    context.Context
-
+	future     future.Future[Object]
+	ctx        context.Context
 	gt         GroupTimer
 	shutdownCh <-chan struct{} // when the thing is actually dead dead
 }
@@ -50,17 +49,19 @@ func (m *managerImpl[Key, Object]) SetTimeout(d time.Duration) {
 }
 
 func (m *managerImpl[Key, Object]) Run(ctx context.Context, key Key) (Object, context.Context, error) {
-	retryTime := time.Millisecond
+	var info *managerInfo[Object]
 
-retry:
-	m.lock.Lock()
-	info, ok := m.connected[key]
-	if !ok {
-		info = m.internalRun(ctx, key)
-		m.connected[key] = info
-	} else {
+	for {
+		m.lock.Lock()
+		var ok bool
+		info, ok = m.connected[key]
+		if !ok {
+			info = m.internalRun(ctx, key)
+			m.lock.Unlock()
+			break
+		}
+
 		var waitForShutdown bool
-
 		select {
 		case <-info.ctx.Done():
 			waitForShutdown = true // runCtx is done but still in map: doing shutdown
@@ -69,34 +70,27 @@ retry:
 				waitForShutdown = true // timer expired but still in map: doing shutdown
 			}
 		}
+		m.lock.Unlock()
 
-		if waitForShutdown {
-			m.lock.Unlock()
+		if !waitForShutdown {
+			break // ok
+		}
 
-			select {
-			case <-ctx.Done():
-				// caller expired while waiting
-				var out Object
-				return out, nil, ctx.Err()
-			case <-info.shutdownCh:
-			}
-
-			select {
-			case <-ctx.Done():
-				// caller expired while blocking for retry
-			case <-time.NewTicker(retryTime).C:
-			}
-
-			retryTime *= 2
-			goto retry
+		select {
+		case <-ctx.Done():
+			// caller expired while waiting
+			var out Object
+			return out, nil, ctx.Err()
+		case <-info.shutdownCh:
 		}
 	}
-	m.lock.Unlock()
 
 	out, err := info.future.Wait(ctx)
 	return out, info.ctx, err
 }
 
+// internalRun sets up the managerInfo for the given key task.
+// It must be called under lock.
 func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *managerInfo[Object] {
 	log.Printf("preparing key=%+v...", key)
 	f, resolve := future.New[Object]()
@@ -111,9 +105,10 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 		gt:         gt,
 		shutdownCh: shutdownCh,
 	}
+	m.connected[key] = info
 
 	go func() {
-		s := &statusImpl{cancel: cancel}
+		s := &statusImpl{ctx: runCtx, cancel: cancel}
 		out, err := m.build(key, s)
 		log.Printf("prepare key=%+v done, err=%v", key, err)
 		if err != nil {
@@ -122,10 +117,20 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 		resolve(out, err)
 
 		if err == nil {
-			<-gt.Done()
-			log.Printf("done key=%+v err=%+v", key, runCtx.Err()) // err may be nil here
+			select {
+			case <-gt.Done():
+				// timeout because users bailed
+			case <-runCtx.Done():
+				// run context was cancelled:
+				//   1. the parent context died (unlikely unless called with something other than context.Background)
+				//   2. the runnable object killed itself
+				err = context.Cause(runCtx)
+			}
+			log.Printf("done key=%+v err=%+v", key, err) // err may be nil here
 
-			err = s.runAfterTasks()
+			if err == nil {
+				err = s.runAfterTasks()
+			}
 
 			cancel(err)
 			log.Printf("shutdown key=%+v err=%+v", key, err) // err may be nil here, but the ctx is cancelled
@@ -143,6 +148,7 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 }
 
 type statusImpl struct {
+	ctx    context.Context
 	cancel context.CancelCauseFunc
 
 	lock       sync.Mutex
@@ -180,6 +186,10 @@ func (s *statusImpl) runAfterTasks() error {
 	}
 
 	return nil
+}
+
+func (s *statusImpl) Context() context.Context {
+	return s.ctx
 }
 
 func (s *statusImpl) After(fn func() error) (stop func() bool) {

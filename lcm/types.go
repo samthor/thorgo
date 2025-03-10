@@ -7,17 +7,21 @@ import (
 
 // Manager is a "life-cycle manager", which allows keyed creation -> use -> shutdown.
 type Manager[Key comparable, Object any] interface {
-
 	// Run creates/joins the lifecycle of an object with the given key.
 	// Returns an error if it could not be created - this is "sticky" while interested.
 	// Otherwise, returns the object and its run context (detached).
 	Run(context.Context, Key) (Object, context.Context, error)
+
+	// SetTimeout sets the future timeout, once no callers are interested, for objects created here.
 	SetTimeout(time.Duration)
 }
 
 type Status interface {
+	Context() context.Context
+
 	// After registers a shutdown function to run after this Status completes.
-	// In normal operation, the context provided when the Manager built this object will still be alive.
+	// These functions will only be called in normal shutdown; if the runnable [context.Context] is cancelled, they will not be called.
+	// Additionally, if any function returns a non-nil error, no further shutdown functions will run.
 	// The returned stop function has the same semantics as [context.AfterFunc].
 	// The passed function will block a manager recreating the managed object; be sure not to deadlock.
 	After(func() error) (stop func() bool)

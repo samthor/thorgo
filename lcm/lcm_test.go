@@ -3,6 +3,7 @@ package lcm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -92,7 +93,7 @@ type RaceShutdown struct {
 func TestManagerShutdownRace(t *testing.T) {
 	var inst int
 
-	m := NewWithContext(t.Context(), func(b string, s Status) (RaceShutdown, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status) (*RaceShutdown, error) {
 		inst++
 
 		releaseShutdownCh := make(chan struct{})
@@ -101,28 +102,27 @@ func TestManagerShutdownRace(t *testing.T) {
 			return nil
 		})
 
-		return RaceShutdown{
+		return &RaceShutdown{
 			releaseShutdownCh: releaseShutdownCh,
 			inst:              inst,
 		}, nil
 	})
 
+	//
 	userCtx1, cancel1 := context.WithCancel(t.Context())
-	rs1, _, _ := m.Run(userCtx1, "foo")
+	rs1, runCtx1, _ := m.Run(userCtx1, "foo")
 	if rs1.inst != 1 {
 		t.Errorf("unexpected seq, wanted 1 was=%v", rs1.inst)
 	}
 	cancel1()
 	time.Sleep(time.Millisecond * 10)
 
-	userCtx2, cancel2 := context.WithCancelCause(t.Context())
-	go func() {
-		time.Sleep(time.Millisecond * 100)
-		cancel2(nil)
-	}()
-	// the below line should block because we're waiting for shutdown
-	_, _, err := m.Run(userCtx2, "foo")
-	if err == nil {
+	userCtx2, cancel2 := context.WithTimeout(t.Context(), time.Millisecond*100)
+	defer cancel2()
+
+	// we won't be able to join here: userCtx2 expires in 100ms _but_ we need to close the shutdownCh first
+	rs1a, _, err := m.Run(userCtx2, "foo")
+	if err == nil || rs1a != nil {
 		t.Errorf("should have timed out join, err was=%v", err)
 	}
 	close(rs1.releaseShutdownCh)
@@ -130,10 +130,49 @@ func TestManagerShutdownRace(t *testing.T) {
 	userCtx3, cancel3 := context.WithCancel(t.Context())
 	rs2, _, _ := m.Run(userCtx3, "foo")
 	if rs2.inst != 2 {
-		t.Errorf("unexpected seq, wanted 2 was=%v", rs2.inst)
+		t.Fatalf("rs2 not valid, should have inst=2: %v", rs2.inst)
 	}
 	cancel3()
 
 	close(rs2.releaseShutdownCh)
 	time.Sleep(time.Millisecond) // mostly ensures logs are assigned to this test properly
+
+	// ensure runCtx is actually cancelled (ages ago)
+	select {
+	case <-runCtx1.Done():
+	case <-time.NewTimer(time.Second).C:
+		t.Errorf("could not wait until ctx was done: %v", runCtx1.Err())
+	}
+}
+
+func TestManagerDie(t *testing.T) {
+	expectedErr := fmt.Errorf("lol error")
+
+	m := NewWithContext(t.Context(), func(b string, s Status) (string, error) {
+		go func() {
+			time.Sleep(time.Millisecond * 10)
+			s.Check(expectedErr)
+		}()
+
+		s.After(func() error {
+			t.Errorf("s.After should not be called")
+			return nil
+		})
+
+		return "_" + b, nil
+	})
+
+	out, ctx, err := m.Run(context.Background(), "x")
+	if out != "_x" || err != nil {
+		t.Errorf("could not run object")
+	}
+
+	select {
+	case <-ctx.Done():
+	case <-time.NewTimer(time.Second).C:
+		t.Errorf("ctx did not shutdown in time")
+	}
+	if context.Cause(ctx) != expectedErr {
+		t.Errorf("bad err returned: %v", context.Cause(ctx))
+	}
 }
