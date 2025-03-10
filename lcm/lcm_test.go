@@ -18,7 +18,7 @@ func TestManager(t *testing.T) {
 	var activeCount atomic.Int32
 	var shutdownCount atomic.Int32
 
-	m := NewWithContext(t.Context(), func(b string, s Status) (FakeObject, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status[any]) (FakeObject, error) {
 		if b == "" {
 			return FakeObject{}, errors.New("empty name")
 		}
@@ -52,7 +52,7 @@ func TestManager(t *testing.T) {
 	})
 
 	userCtx, cancel := context.WithCancel(t.Context())
-	fo, _, err := m.Run(userCtx, "butt")
+	fo, _, err := m.Run(userCtx, "butt", nil)
 	if err != nil {
 		t.Errorf("got err creating obj: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestManager(t *testing.T) {
 
 	// check failure mode
 	userCtx, cancel = context.WithCancel(t.Context())
-	_, runCtx, err := m.Run(userCtx, "")
+	_, runCtx, err := m.Run(userCtx, "", nil)
 	if err == nil {
 		t.Errorf("expected non-nil err: %v", err)
 	}
@@ -93,7 +93,7 @@ type RaceShutdown struct {
 func TestManagerShutdownRace(t *testing.T) {
 	var inst int
 
-	m := NewWithContext(t.Context(), func(b string, s Status) (*RaceShutdown, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status[any]) (*RaceShutdown, error) {
 		inst++
 
 		releaseShutdownCh := make(chan struct{})
@@ -110,7 +110,7 @@ func TestManagerShutdownRace(t *testing.T) {
 
 	//
 	userCtx1, cancel1 := context.WithCancel(t.Context())
-	rs1, runCtx1, _ := m.Run(userCtx1, "foo")
+	rs1, runCtx1, _ := m.Run(userCtx1, "foo", nil)
 	if rs1.inst != 1 {
 		t.Errorf("unexpected seq, wanted 1 was=%v", rs1.inst)
 	}
@@ -121,14 +121,14 @@ func TestManagerShutdownRace(t *testing.T) {
 	defer cancel2()
 
 	// we won't be able to join here: userCtx2 expires in 100ms _but_ we need to close the shutdownCh first
-	rs1a, _, err := m.Run(userCtx2, "foo")
+	rs1a, _, err := m.Run(userCtx2, "foo", nil)
 	if err == nil || rs1a != nil {
 		t.Errorf("should have timed out join, err was=%v", err)
 	}
 	close(rs1.releaseShutdownCh)
 
 	userCtx3, cancel3 := context.WithCancel(t.Context())
-	rs2, _, _ := m.Run(userCtx3, "foo")
+	rs2, _, _ := m.Run(userCtx3, "foo", nil)
 	if rs2.inst != 2 {
 		t.Fatalf("rs2 not valid, should have inst=2: %v", rs2.inst)
 	}
@@ -148,7 +148,7 @@ func TestManagerShutdownRace(t *testing.T) {
 func TestManagerDie(t *testing.T) {
 	expectedErr := fmt.Errorf("lol error")
 
-	m := NewWithContext(t.Context(), func(b string, s Status) (string, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status[any]) (string, error) {
 		go func() {
 			time.Sleep(time.Millisecond * 10)
 			s.Check(expectedErr)
@@ -162,7 +162,7 @@ func TestManagerDie(t *testing.T) {
 		return "_" + b, nil
 	})
 
-	out, ctx, err := m.Run(context.Background(), "x")
+	out, ctx, err := m.Run(context.Background(), "x", nil)
 	if out != "_x" || err != nil {
 		t.Errorf("could not run object")
 	}
@@ -182,7 +182,7 @@ func TestTask(t *testing.T) {
 	var afterCalled bool
 	releaseCh := make(chan struct{})
 
-	m := NewWithContext(t.Context(), func(b string, s Status) (string, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status[any]) (string, error) {
 		s.After(func() error {
 			afterCalled = true
 			return nil
@@ -199,7 +199,7 @@ func TestTask(t *testing.T) {
 	})
 
 	ctx, cancel := context.WithCancel(t.Context())
-	m.Run(ctx, "x")
+	m.Run(ctx, "x", nil)
 	cancel()
 
 	// TODO: timeout tests are bad juju but they work for now

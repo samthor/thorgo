@@ -8,56 +8,60 @@ import (
 	"time"
 
 	"github.com/samthor/thorgo/future"
+	"github.com/samthor/thorgo/lgroup"
 	"golang.org/x/sync/errgroup"
 )
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
-func New[Key comparable, Object any](build BuildFunc[Key, Object]) Manager[Key, Object] {
+func New[Key comparable, Object, Init any](build BuildFunc[Key, Object, Init]) Manager[Key, Object, Init] {
 	return NewWithContext(context.Background(), build)
 }
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
 // The passed initial context should normally be context.Background, as it is used as the parent of all lazily-created objects.
 // It could be something else if you wanted to be able to cancel all objects at once.
-func NewWithContext[Key comparable, Object any](ctx context.Context, build BuildFunc[Key, Object]) Manager[Key, Object] {
-	return &managerImpl[Key, Object]{
+func NewWithContext[Key comparable, Object, Init any](ctx context.Context, build BuildFunc[Key, Object, Init]) Manager[Key, Object, Init] {
+	return &managerImpl[Key, Object, Init]{
 		ctx:       ctx,
 		build:     build,
-		connected: map[Key]*managerInfo[Object]{},
+		connected: map[Key]*managerInfo[Object, Init]{},
 	}
 }
 
-type managerImpl[Key comparable, Object any] struct {
+type managerImpl[Key comparable, Object, Init any] struct {
 	ctx             context.Context
-	build           BuildFunc[Key, Object]
+	build           BuildFunc[Key, Object, Init]
 	shutdownTimeout time.Duration
 
 	lock      sync.Mutex
-	connected map[Key]*managerInfo[Object]
+	connected map[Key]*managerInfo[Object, Init]
 }
 
-type managerInfo[Object any] struct {
+type managerInfo[Object, Init any] struct {
 	future     future.Future[Object]
 	ctx        context.Context
-	gt         GroupTimer
 	shutdownCh <-chan struct{} // when the thing is actually dead dead
+	start      func()
+	status     *statusImpl[Init]
 }
 
-func (m *managerImpl[Key, Object]) SetTimeout(d time.Duration) {
+func (m *managerImpl[Key, Object, Init]) SetTimeout(d time.Duration) {
 	m.lock.Lock()
 	defer m.lock.Unlock()
 	m.shutdownTimeout = d
 }
 
-func (m *managerImpl[Key, Object]) Run(ctx context.Context, key Key) (Object, context.Context, error) {
-	var info *managerInfo[Object]
+func (m *managerImpl[Key, Object, Init]) Run(ctx context.Context, key Key, init Init) (Object, context.Context, error) {
+	var info *managerInfo[Object, Init]
 
 	for {
 		m.lock.Lock()
 		var ok bool
 		info, ok = m.connected[key]
 		if !ok {
-			info = m.internalRun(ctx, key)
+			info = m.internalRun(key)
+			info.status.lg.Join(ctx, init) // brand new, join immediately
+			info.start()                   // release lgroup
 			m.lock.Unlock()
 			break
 		}
@@ -67,7 +71,7 @@ func (m *managerImpl[Key, Object]) Run(ctx context.Context, key Key) (Object, co
 		case <-info.ctx.Done():
 			waitForShutdown = true // runCtx is done but still in map: doing shutdown
 		default:
-			if !info.gt.Join(ctx) {
+			if !info.status.lg.Join(ctx, init) {
 				waitForShutdown = true // timer expired but still in map: doing shutdown
 			}
 		}
@@ -92,36 +96,43 @@ func (m *managerImpl[Key, Object]) Run(ctx context.Context, key Key) (Object, co
 
 // internalRun sets up the managerInfo for the given key task.
 // It must be called under lock.
-func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *managerInfo[Object] {
+func (m *managerImpl[Key, Object, Init]) internalRun(key Key) *managerInfo[Object, Init] {
 	log.Printf("preparing key=%+v...", key)
 	f, resolve := future.New[Object]()
 
 	runCtx, cancel := context.WithCancelCause(m.ctx)
 
-	gt := NewGroupTimer(m.shutdownTimeout, ctx)
+	lg, start := lgroup.NewLGroup[Init](cancel)
+
 	shutdownCh := make(chan struct{})
-	info := &managerInfo[Object]{
+	info := &managerInfo[Object, Init]{
 		ctx:        runCtx,
 		future:     f,
-		gt:         gt,
 		shutdownCh: shutdownCh,
+		start:      start,
+		status: &statusImpl[Init]{
+			ctx:    runCtx,
+			cancel: cancel,
+			lg:     lg,
+		},
 	}
 	m.connected[key] = info
 
+	lgroupDone := info.status.lg.Done()
+
 	go func() {
-		s := &statusImpl{ctx: runCtx, cancel: cancel}
-		out, err := m.build(key, s)
+		out, err := m.build(key, info.status)
 		log.Printf("prepare key=%+v done, err=%v", key, err)
 		if err != nil {
 			cancel(err) // could not even create self (cancel ctx before resolve)
 		}
-		resolve(out, err)
+		resolve(out, err) // this will allow folks to join
 
 		if err == nil {
-			s.startTasks()
+			info.status.startTasks()
 
 			select {
-			case <-gt.Done():
+			case <-lgroupDone:
 				// timeout because users bailed
 			case <-runCtx.Done():
 				// run context was cancelled:
@@ -131,13 +142,13 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 			}
 
 			// signal tasks; wait for all to be done
-			close(s.taskCh)
-			s.taskGroup.Wait()
+			close(info.status.taskCh)
+			info.status.taskGroup.Wait()
 
 			log.Printf("done key=%+v err=%+v", key, err) // err may be nil here
 
 			if err == nil {
-				err = s.runAfter()
+				err = info.status.runAfter()
 			}
 
 			cancel(err) // make sure run context is dead now, even with nil err
@@ -155,9 +166,11 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 	return info
 }
 
-type statusImpl struct {
+type statusImpl[Init any] struct {
 	ctx    context.Context
 	cancel context.CancelCauseFunc
+
+	lg lgroup.LGroup[Init]
 
 	taskLock  sync.Mutex
 	tasks     []TaskFunc
@@ -175,7 +188,7 @@ type afterStatus struct {
 
 // runAfter runs all tasks on this instance of Status, stopping early if any return a non-nil error.
 // Tasks may continue to be added during this, in which case they'll also be run.
-func (s *statusImpl) runAfter() error {
+func (s *statusImpl[Init]) runAfter() error {
 	var i int
 	for {
 		s.lock.Lock()
@@ -201,11 +214,11 @@ func (s *statusImpl) runAfter() error {
 	return nil
 }
 
-func (s *statusImpl) Context() context.Context {
+func (s *statusImpl[Init]) Context() context.Context {
 	return s.ctx
 }
 
-func (s *statusImpl) startTasks() {
+func (s *statusImpl[Init]) startTasks() {
 	s.taskLock.Lock()
 	defer s.taskLock.Unlock()
 
@@ -218,7 +231,7 @@ func (s *statusImpl) startTasks() {
 	s.tasks = nil
 }
 
-func (s *statusImpl) alwaysStartTask(fn TaskFunc) {
+func (s *statusImpl[Init]) alwaysStartTask(fn TaskFunc) {
 	s.taskGroup.Go(func() error {
 		err := fn(s.taskCh)
 		if err != nil {
@@ -228,7 +241,7 @@ func (s *statusImpl) alwaysStartTask(fn TaskFunc) {
 	})
 }
 
-func (s *statusImpl) Task(fn TaskFunc) {
+func (s *statusImpl[Init]) Task(fn TaskFunc) {
 	s.taskLock.Lock()
 	defer s.taskLock.Unlock()
 
@@ -245,7 +258,7 @@ func (s *statusImpl) Task(fn TaskFunc) {
 	s.alwaysStartTask(fn)
 }
 
-func (s *statusImpl) After(fn func() error) (stop func() bool) {
+func (s *statusImpl[Init]) After(fn func() error) (stop func() bool) {
 	a := &afterStatus{fn: fn}
 
 	s.lock.Lock()
@@ -261,14 +274,18 @@ func (s *statusImpl) After(fn func() error) (stop func() bool) {
 	}
 }
 
-func (s *statusImpl) Check(err error) error {
+func (s *statusImpl[Init]) JoinTask(fn func(context.Context, Init) error) {
+	s.lg.Register(fn)
+}
+
+func (s *statusImpl[Init]) Check(err error) error {
 	if err != nil {
 		s.cancel(err)
 	}
 	return err
 }
 
-func (s *statusImpl) CheckWrap(str string, err error) error {
+func (s *statusImpl[Init]) CheckWrap(str string, err error) error {
 	if err == nil {
 		return nil
 	}

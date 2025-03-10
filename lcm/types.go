@@ -2,22 +2,24 @@ package lcm
 
 import (
 	"context"
-	"time"
 )
 
 // Manager is a "life-cycle manager", which allows keyed creation -> use -> shutdown.
-type Manager[Key comparable, Object any] interface {
+type Manager[Key comparable, Object, Init any] interface {
 	// Run creates/joins the lifecycle of an object with the given key.
 	// Returns an error if it could not be created - this is "sticky" while interested.
 	// Otherwise, returns the object and its run context (detached).
-	Run(context.Context, Key) (Object, context.Context, error)
-
-	// SetTimeout sets the future timeout, once no callers are interested, for objects created here.
-	SetTimeout(time.Duration)
+	Run(context.Context, Key, Init) (Object, context.Context, error)
 }
 
-type Status interface {
+type Status[Init any] interface {
 	Context() context.Context
+
+	// JoinTask registers a join function to handle join lifecycle.
+	// This is run in its own goroutine and blocks shutdown until completion; a normal use is to wait on [context.Context.Done] and do cleanup tasks once done.
+	// All registered methods may run in parallel.
+	// Notably this ensures the managed object stays alive during context shutdown: [context.AfterFunc] doesn't do this on its own.
+	JoinTask(func(context.Context, Init) error)
 
 	// Task creates an immediate task that is started in a goroutine after the object is successfully created.
 	// It will be deferred until the builder function first returns (or not called if this errors).
@@ -40,6 +42,7 @@ type Status interface {
 }
 
 // BuildFunc can build a managed object, or fail immediately.
-type BuildFunc[Key comparable, Object any] func(Key, Status) (Object, error)
+type BuildFunc[Key comparable, Object, Init any] func(Key, Status[Init]) (Object, error)
 
+// TaskFunc runs for the overall runtime of the status object.
 type TaskFunc func(stop <-chan struct{}) error
