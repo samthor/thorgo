@@ -11,12 +11,14 @@ import (
 )
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
+func New[Key comparable, Object any](build BuildFunc[Key, Object]) Manager[Key, Object] {
+	return NewWithContext(context.Background(), build)
+}
+
+// New returns a new Manager that manages the lifecycle of lazily-created objects.
 // The passed initial context should normally be context.Background, as it is used as the parent of all lazily-created objects.
 // It could be something else if you wanted to be able to cancel all objects at once.
-func New[Key comparable, Object any](
-	ctx context.Context,
-	build BuildFn[Key, Object],
-) Manager[Key, Object] {
+func NewWithContext[Key comparable, Object any](ctx context.Context, build BuildFunc[Key, Object]) Manager[Key, Object] {
 	return &managerImpl[Key, Object]{
 		ctx:       ctx,
 		build:     build,
@@ -26,7 +28,7 @@ func New[Key comparable, Object any](
 
 type managerImpl[Key comparable, Object any] struct {
 	ctx             context.Context
-	build           BuildFn[Key, Object]
+	build           BuildFunc[Key, Object]
 	shutdownTimeout time.Duration
 
 	lock      sync.Mutex

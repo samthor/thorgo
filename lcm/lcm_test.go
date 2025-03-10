@@ -17,7 +17,7 @@ func TestManager(t *testing.T) {
 	var activeCount atomic.Int32
 	var shutdownCount atomic.Int32
 
-	m := New(t.Context(), func(b string, s Status) (FakeObject, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status) (FakeObject, error) {
 		if b == "" {
 			return FakeObject{}, errors.New("empty name")
 		}
@@ -92,7 +92,7 @@ type RaceShutdown struct {
 func TestManagerShutdownRace(t *testing.T) {
 	var inst int
 
-	m := New(t.Context(), func(b string, s Status) (RaceShutdown, error) {
+	m := NewWithContext(t.Context(), func(b string, s Status) (RaceShutdown, error) {
 		inst++
 
 		releaseShutdownCh := make(chan struct{})
