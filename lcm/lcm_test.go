@@ -3,7 +3,6 @@ package lcm
 import (
 	"context"
 	"errors"
-	"log"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -14,30 +13,39 @@ type FakeObject struct {
 	name          string
 }
 
-func (fo FakeObject) Shutdown() {
-	fo.shutdownCount.Add(1)
-}
-
 func TestManager(t *testing.T) {
 	var activeCount atomic.Int32
 	var shutdownCount atomic.Int32
 
-	m := New(t.Context(), func(b Build[string]) (FakeObject, error) {
-		if b.Key == "" {
+	m := New(t.Context(), func(b string, s Status) (FakeObject, error) {
+		if b == "" {
 			return FakeObject{}, errors.New("empty name")
 		}
 
 		fo := FakeObject{
 			shutdownCount: &shutdownCount,
-			name:          b.Key,
+			name:          b,
 		}
 
 		activeCount.Add(1)
 		time.Sleep(time.Microsecond)
 
-		context.AfterFunc(b.C, func() {
+		s.After(func() error {
 			activeCount.Add(-1)
+			return nil
 		})
+
+		s.After(func() error {
+			shutdownCount.Add(1)
+			return nil
+		})
+
+		// check that cleanup works by removing it immediately
+		cleanup := s.After(func() error {
+			activeCount.Add(-100)
+			return nil
+		})
+		cleanup()
 
 		return fo, nil
 	})
@@ -81,19 +89,20 @@ type RaceShutdown struct {
 	inst              int
 }
 
-func (rs RaceShutdown) Shutdown() error {
-	log.Printf("waiting for ch to be done inst=%v", rs.inst)
-	<-rs.releaseShutdownCh
-	return nil
-}
-
 func TestManagerShutdownRace(t *testing.T) {
 	var inst int
 
-	m := New(t.Context(), func(b Build[string]) (RaceShutdown, error) {
+	m := New(t.Context(), func(b string, s Status) (RaceShutdown, error) {
 		inst++
+
+		releaseShutdownCh := make(chan struct{})
+		s.After(func() error {
+			<-releaseShutdownCh
+			return nil
+		})
+
 		return RaceShutdown{
-			releaseShutdownCh: make(chan struct{}),
+			releaseShutdownCh: releaseShutdownCh,
 			inst:              inst,
 		}, nil
 	})

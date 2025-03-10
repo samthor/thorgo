@@ -15,27 +15,18 @@ type Manager[Key comparable, Object any] interface {
 	SetTimeout(time.Duration)
 }
 
-// Build is passed to BuildFn for build operations.
-type Build[Key comparable] struct {
-	Key    Key
-	C      context.Context
-	Cancel context.CancelCauseFunc
-}
-
 // BuildFn can build a resulting done-able object or fail.
-type BuildFn[Key comparable, Object any] func(Build[Key]) (Object, error)
+type BuildFn[Key comparable, Object any] func(Key, Status) (Object, error)
 
-// Objects used within Manager can optionally implement HasShutdown.
-// If so, Shutdown is called on normal shutdown (no-one is interested in object) before the context is cancelled.
-// This method is not called in a failure mode (listen to the context yourself).
-type HasShutdown interface {
-	Shutdown()
-}
+type Status interface {
+	// After registers a shutdown function to run after this Status completes.
+	// In normal operation, it is called with a still-valid [context.Context].
+	// The returned stop function has the same semantics as [context.AfterFunc].
+	After(func() error) (stop func() bool)
 
-// Objects used within Manager can optionally implement HasShutdownError.
-// If so, Shutdown is called on normal shutdown (no-one is interested in object) before the context is cancelled.
-// The returned error is used to cancel the context (nil just means cancelled normally).
-// This method is not called in a failure mode (listen to the context yourself).
-type HasShutdownError interface {
-	Shutdown() error
+	// Check passes through the given error. If it is non-nil, it cancels this managed object.
+	Check(error) error
+
+	// CheckWrap passes through the given error. If it is non-nil, it cancels this managed object with a wrapped error ("%s: %w").
+	CheckWrap(string, error) error
 }

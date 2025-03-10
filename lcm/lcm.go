@@ -2,6 +2,7 @@ package lcm
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -10,7 +11,8 @@ import (
 )
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
-// The passed initial context should be context.Background, as it is used as the parent of all lazily-created objects.
+// The passed initial context should normally be context.Background, as it is used as the parent of all lazily-created objects.
+// It could be something else if you wanted to be able to cancel all objects at once.
 func New[Key comparable, Object any](
 	ctx context.Context,
 	build BuildFn[Key, Object],
@@ -109,11 +111,8 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 	}
 
 	go func() {
-		out, err := m.build(Build[Key]{
-			Key:    key,
-			C:      runCtx,
-			Cancel: cancel,
-		})
+		s := &statusImpl{cancel: cancel}
+		out, err := m.build(key, s)
 		log.Printf("prepare key=%+v done, err=%v", key, err)
 		if err != nil {
 			cancel(err) // could not even create self (cancel ctx before resolve)
@@ -124,19 +123,10 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 			<-gt.Done()
 			log.Printf("done key=%+v err=%+v", key, runCtx.Err()) // err may be nil here
 
-			hasShutdownLog := "no"
-			var err error
-
-			if hs, ok := any(out).(HasShutdownError); ok {
-				err = hs.Shutdown()
-				hasShutdownLog = "yes"
-			} else if hs, ok := any(out).(HasShutdown); ok {
-				hs.Shutdown()
-				hasShutdownLog = "yes"
-			}
+			err = s.runAfterTasks()
 
 			cancel(err)
-			log.Printf("shutdown(%s) key=%+v err=%+v", hasShutdownLog, key, err) // err may be nil here, but the ctx is cancelled
+			log.Printf("shutdown key=%+v err=%+v", key, err) // err may be nil here, but the ctx is cancelled
 		}
 
 		// delete ourselves from map
@@ -148,4 +138,74 @@ func (m *managerImpl[Key, Object]) internalRun(ctx context.Context, key Key) *ma
 	}()
 
 	return info
+}
+
+type statusImpl struct {
+	cancel context.CancelCauseFunc
+
+	lock       sync.Mutex
+	afterTasks []*afterStatus
+}
+
+type afterStatus struct {
+	once sync.Once // either starts running f or stops f from running
+	fn   func() error
+}
+
+// runAfterTasks runs all tasks on this instance of Status, stopping early if any return a non-nil error.
+// Tasks may continue to be added during this, in which case they'll also be run.
+func (s *statusImpl) runAfterTasks() error {
+	var i int
+	for {
+		s.lock.Lock()
+		if i == len(s.afterTasks) {
+			s.lock.Unlock()
+			break
+		}
+
+		next := s.afterTasks[i]
+		s.lock.Unlock()
+		i++
+
+		var err error
+		next.once.Do(func() {
+			err = next.fn()
+		})
+
+		if err != nil {
+			return err // bail early
+		}
+	}
+
+	return nil
+}
+
+func (s *statusImpl) After(fn func() error) (stop func() bool) {
+	a := &afterStatus{fn: fn}
+
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.afterTasks = append(s.afterTasks, a)
+
+	return func() (stopped bool) {
+		a.once.Do(func() { stopped = true })
+		if stopped {
+			// TODO: remove ref (GC)
+		}
+		return stopped
+	}
+}
+
+func (s *statusImpl) Check(err error) error {
+	if err != nil {
+		s.cancel(err)
+	}
+	return err
+}
+
+func (s *statusImpl) CheckWrap(str string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return s.Check(fmt.Errorf("%s: %w", str, err))
 }
