@@ -215,3 +215,28 @@ func TestTask(t *testing.T) {
 		t.Errorf("should be done")
 	}
 }
+
+func TestJoinTask(t *testing.T) {
+	errExpected := errors.New("expected")
+	failCh := make(chan struct{})
+
+	m := NewWithContext(t.Context(), func(b string, s Status[any]) (string, error) {
+		s.JoinTask(func(ctx context.Context, a any) error {
+			t.Errorf("should not join; err in setup")
+			<-failCh
+			return nil
+		})
+		return "", errExpected
+	})
+
+	_, _, err := m.Run(t.Context(), "x", nil)
+	if err != errExpected {
+		t.Errorf("got unexpected err: %v", err)
+	}
+
+	select {
+	case <-failCh:
+		t.Errorf("got failCh")
+	case <-time.After(time.Millisecond * 2):
+	}
+}

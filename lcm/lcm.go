@@ -61,7 +61,7 @@ func (m *managerImpl[Key, Object, Init]) Run(ctx context.Context, key Key, init 
 		if !ok {
 			info = m.internalRun(key)
 			info.status.lg.Join(ctx, init) // brand new, join immediately
-			info.start()                   // release lgroup
+			defer info.start()             // must always release lgroup
 			m.lock.Unlock()
 			break
 		}
@@ -87,6 +87,7 @@ func (m *managerImpl[Key, Object, Init]) Run(ctx context.Context, key Key, init 
 			var out Object
 			return out, nil, ctx.Err()
 		case <-info.shutdownCh:
+			// we waited for the thing to shut down; we can try creating it anew
 		}
 	}
 
@@ -268,14 +269,21 @@ func (s *statusImpl[Init]) After(fn func() error) (stop func() bool) {
 	return func() (stopped bool) {
 		a.once.Do(func() { stopped = true })
 		if stopped {
-			// TODO: remove ref (GC)
+			a.fn = nil // remove ref (GC)
 		}
 		return stopped
 	}
 }
 
 func (s *statusImpl[Init]) JoinTask(fn func(context.Context, Init) error) {
-	s.lg.Register(fn)
+	s.lg.Register(func(ctx context.Context, i Init) error {
+		select {
+		case <-s.Context().Done():
+			return nil // don't start if we cancelled (e.g., thing failed to create)
+		default:
+		}
+		return fn(ctx, i)
+	})
 }
 
 func (s *statusImpl[Init]) Check(err error) error {

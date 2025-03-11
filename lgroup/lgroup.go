@@ -17,8 +17,12 @@ type LGroup[Init any] interface {
 	Done() <-chan struct{}
 }
 
+// NewLGroup creates a new LGroup which manages the lifecycles of contexts and helper functions over them.
+// The caller must eventually call start(); to do otherwise leaks.
+// The start() method allows setup/join before kickoff, that way the LGroup doesn't start dead.
 func NewLGroup[Init any](cancel context.CancelCauseFunc) (group LGroup[Init], start func()) {
 	startNonce := &nonceKey{}
+	startCh := make(chan struct{})
 
 	lg := &lgroup[Init]{
 		active: map[*nonceKey]*activeContext[Init]{
@@ -26,8 +30,9 @@ func NewLGroup[Init any](cancel context.CancelCauseFunc) (group LGroup[Init], st
 				activeHandlers: atomic.Int32{},
 			},
 		},
-		cancel: cancel,
-		doneCh: make(chan struct{}),
+		cancel:  cancel,
+		startCh: startCh,
+		doneCh:  make(chan struct{}),
 	}
 
 	// use our internal mechanisms to _at least_ block until each context is done
@@ -39,6 +44,8 @@ func NewLGroup[Init any](cancel context.CancelCauseFunc) (group LGroup[Init], st
 	return lg, func() {
 		lg.lock.Lock()
 		defer lg.lock.Unlock()
+
+		close(startCh)
 
 		if startNonce != nil {
 			lg.releaseActive(startNonce)
@@ -58,6 +65,7 @@ func (lg *lgroup[Init]) run(nonce *nonceKey, ac *activeContext[Init], handler fu
 	ac.activeHandlers.Add(1)
 
 	go func() {
+		<-lg.startCh // caller must trigger start()
 		err := handler(ac.C, ac.init)
 		if err != nil {
 			lg.cancel(err)
@@ -78,12 +86,12 @@ func (lg *lgroup[Init]) run(nonce *nonceKey, ac *activeContext[Init], handler fu
 }
 
 type lgroup[Init any] struct {
-	cancel context.CancelCauseFunc
+	startCh <-chan struct{}
+	doneCh  chan struct{}
+	cancel  context.CancelCauseFunc
 
-	lock   sync.Mutex
-	doneCh chan struct{}
-	active map[*nonceKey]*activeContext[Init]
-
+	lock     sync.Mutex
+	active   map[*nonceKey]*activeContext[Init]
 	handlers []func(context.Context, Init) error
 }
 
