@@ -13,14 +13,35 @@ import (
 )
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
-func New[Key comparable, Object, Init any](build BuildFunc[Key, Object, Init]) Manager[Key, Object, Init] {
-	return NewWithContext(context.Background(), build)
+func New[Key comparable, Object, Init any](
+	build BuildFunc[Key, Object, Init],
+	options ...Option,
+) Manager[Key, Object, Init] {
+	return NewWithContext(context.Background(), build, options...)
 }
 
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
 // The passed initial context should normally be context.Background, as it is used as the parent of all lazily-created objects.
 // It could be something else if you wanted to be able to cancel all objects at once.
-func NewWithContext[Key comparable, Object, Init any](ctx context.Context, build BuildFunc[Key, Object, Init]) Manager[Key, Object, Init] {
+func NewWithContext[Key comparable, Object, Init any](
+	ctx context.Context,
+	build BuildFunc[Key, Object, Init],
+	options ...Option,
+) Manager[Key, Object, Init] {
+
+	// apply options (just joinTask and timeout for now)
+	for _, o := range options {
+		if o.joinTask != nil {
+			actualBuild := build
+			build = func(k Key, s Status[Init]) (Object, error) {
+				s.JoinTask(func(ctx context.Context, i Init) error {
+					return o.joinTask(ctx)
+				})
+				return actualBuild(k, s)
+			}
+		}
+	}
+
 	return &managerImpl[Key, Object, Init]{
 		ctx:       ctx,
 		build:     build,
