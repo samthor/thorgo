@@ -12,6 +12,22 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+var (
+	lcmLogs = false
+)
+
+// EnableLogs turns on logs for some things in this package.
+// Just for debugging.
+func EnableLogs() {
+	lcmLogs = true
+}
+
+func lcmLog(key any, format string, args ...any) {
+	if lcmLogs {
+		log.Printf("[%s] "+format, key, args)
+	}
+}
+
 // New returns a new Manager that manages the lifecycle of lazily-created objects.
 func New[Key comparable, Object, Init any](
 	build BuildFunc[Key, Object, Init],
@@ -119,7 +135,7 @@ func (m *managerImpl[Key, Object, Init]) Run(ctx context.Context, key Key, init 
 // internalRun sets up the managerInfo for the given key task.
 // It must be called under lock.
 func (m *managerImpl[Key, Object, Init]) internalRun(key Key) *managerInfo[Object, Init] {
-	log.Printf("preparing key=%+v...", key)
+	lcmLog(key, "preparing...")
 	f, resolve := future.New[Object]()
 
 	runCtx, cancel := context.WithCancelCause(m.ctx)
@@ -144,7 +160,7 @@ func (m *managerImpl[Key, Object, Init]) internalRun(key Key) *managerInfo[Objec
 
 	go func() {
 		out, err := m.build(key, info.status)
-		log.Printf("prepare key=%+v done, err=%v", key, err)
+		lcmLog(key, "prepare done, err=%v", err)
 		if err != nil {
 			cancel(err) // could not even create self (cancel ctx before resolve)
 		}
@@ -167,21 +183,20 @@ func (m *managerImpl[Key, Object, Init]) internalRun(key Key) *managerInfo[Objec
 			close(info.status.taskCh)
 			info.status.taskGroup.Wait()
 
-			log.Printf("done key=%+v err=%+v", key, err) // err may be nil here
-
 			if err == nil {
+				lcmLog(key, "clean stop, running afterTasks")
 				err = info.status.runAfter()
 			}
 
 			cancel(err) // make sure run context is dead now, even with nil err
-			log.Printf("shutdown key=%+v err=%+v", key, err)
+			lcmLog(key, "shutdown, err=%v", err)
 		}
 
 		// delete ourselves from map
 		m.lock.Lock()
 		defer m.lock.Unlock()
 		close(shutdownCh) // under lock (this makes close/delete 'atomic')
-		log.Printf("cleanup key=%+v", key)
+		lcmLog(key, "cleanup")
 		delete(m.connected, key)
 	}()
 
