@@ -116,15 +116,28 @@ func (g *guardImpl[Token, Key]) expireToken(t Token) {
 
 	for _, gs := range invalidSessions {
 		go func() {
-			use, err := g.check(g.ctx, gs.key, tokens)
-			if err != nil {
-				gs.lock.Lock()
-				gs.err = err
+			// only we have "gs" reference here, the lock is just for user-facing stuff
+			gs.lock.Lock()
+			if gs.stopped {
 				gs.lock.Unlock()
+				return // don't install again
+			}
+
+			gs.lock.Unlock()
+			// we unlock here because g.check might take "time", and the user of gs might still want to look at it
+			use, err := g.check(g.ctx, gs.key, tokens)
+			gs.lock.Lock()
+			if err != nil {
+				gs.err = err
 				// use should be nil with err; make sure anyway, installSession will close our ch
 				use = nil
 			}
-			g.installSession(gs, use)
+
+			// check stopped agian
+			if !gs.stopped {
+				g.installSession(gs, use)
+			}
+			gs.lock.Unlock()
 		}()
 	}
 }
@@ -160,11 +173,6 @@ func (g *guardImpl[Token, Key]) installSession(gs *guardSession[Token, Key], use
 		// not referenced anywhere, we can close
 		close(gs.ch)
 	}
-}
-
-type Session[Token any] interface {
-	Err() error
-	TokenCh() <-chan Token
 }
 
 func (g *guardImpl[Token, Key]) RunSession(key Key) (Session[Token], error) {
@@ -210,16 +218,24 @@ type guardSession[Token comparable, Key any] struct {
 	tokens map[Token]struct{}
 	ch     chan Token
 
-	lock sync.Mutex
-	err  error
+	lock    sync.Mutex
+	stopped bool
+	err     error
 }
 
-func (g *guardSession[Token, Key]) Err() error {
-	g.lock.Lock()
-	defer g.lock.Unlock()
-	return g.err
+func (gs *guardSession[Token, Key]) Err() error {
+	gs.lock.Lock()
+	defer gs.lock.Unlock()
+	return gs.err
 }
 
-func (g *guardSession[Token, Key]) TokenCh() <-chan Token {
-	return g.ch
+func (gs *guardSession[Token, Key]) TokenCh() <-chan Token {
+	return gs.ch
+}
+
+func (gs *guardSession[Token, Key]) Stop() {
+	gs.lock.Lock()
+	defer gs.lock.Lock()
+	gs.stopped = true
+	close(gs.ch)
 }
