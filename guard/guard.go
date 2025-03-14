@@ -169,8 +169,9 @@ func (g *guardImpl[Token, Key]) installSession(gs *guardSession[Token, Key], use
 		g.tokenLock.Unlock()
 	}
 
-	if len(valid) == 0 {
+	if len(valid) == 0 && !gs.stopped {
 		// not referenced anywhere, we can close
+		gs.stopped = true
 		close(gs.ch)
 	}
 }
@@ -234,8 +235,16 @@ func (gs *guardSession[Token, Key]) TokenCh() <-chan Token {
 }
 
 func (gs *guardSession[Token, Key]) Stop() {
+	go func() {
+		for range gs.ch {
+			// drain ch (maybe the caller gave up listening to Stop)
+		}
+	}()
+
 	gs.lock.Lock()
 	defer gs.lock.Lock()
-	gs.stopped = true
-	close(gs.ch)
+	if !gs.stopped {
+		gs.stopped = true
+		close(gs.ch)
+	}
 }
