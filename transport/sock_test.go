@@ -23,7 +23,7 @@ func TestSock(t *testing.T) {
 		}
 
 		ctx, cancel := context.WithCancel(r.Context())
-		tr := SocketJSON(ctx, sock)
+		tr, _ := SocketJSON(ctx, sock)
 		defer cancel()
 
 		var out struct {
@@ -46,7 +46,7 @@ func TestSock(t *testing.T) {
 		t.Errorf("could not create sock: %v", err)
 	}
 
-	tr := SocketJSON(context.Background(), sock)
+	tr, _ := SocketJSON(context.Background(), sock)
 	err = tr.Send(map[string]string{"message": "hi there"})
 	if err != nil {
 		t.Errorf("could not send test payload: %v", err)

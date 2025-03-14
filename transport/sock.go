@@ -35,19 +35,20 @@ func (s *socketTransport) Send(o any) error {
 	return err
 }
 
-// SocketJSON wraps an open websocket.Conn, converting it to an untyped Transport.
+// SocketJSON wraps an open websocket.Conn, converting it to an untyped Transport that reads and writes JSON.
 // It derives a new Context which is canceled only if a Read/Send operation fails, but which also closes the socket itself.
-func SocketJSON(ctx context.Context, sock *websocket.Conn) Transport {
+// If the cancel method is called with a [websocket.CloseError], the socket is closed in that way.
+func SocketJSON(ctx context.Context, sock *websocket.Conn) (t Transport, cancel context.CancelCauseFunc) {
 	ctx = internal.RegisterHttpContext(ctx)
 	socketCtx, cancel := context.WithCancelCause(ctx)
 
 	context.AfterFunc(socketCtx, func() {
-		err := socketCtx.Err()
+		cause := context.Cause(socketCtx)
 		var closeError websocket.CloseError
 
-		if errors.As(err, &closeError) {
+		if errors.As(cause, &closeError) {
 			sock.Close(closeError.Code, closeError.Reason)
-		} else if err != context.Canceled {
+		} else if cause != context.Canceled {
 			sock.Close(websocket.StatusInternalError, "")
 		} else {
 			sock.Close(websocket.StatusNormalClosure, "")
@@ -58,5 +59,5 @@ func SocketJSON(ctx context.Context, sock *websocket.Conn) Transport {
 		ctx:    socketCtx,
 		cancel: cancel,
 		sock:   sock,
-	}
+	}, cancel
 }

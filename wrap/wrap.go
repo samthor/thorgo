@@ -1,7 +1,6 @@
 package wrap
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -50,7 +49,7 @@ func Http(fn HttpFunc) http.HandlerFunc {
 	}
 }
 
-// WebSocketTransport returns a http.HandlerFunc that wraps a websocket setup/teardown into a transport.Transport.
+// WebSocketTransport returns a http.HandlerFunc that wraps a websocket setup/teardown into a transport.Transport which sends and receives JSON packets.
 func WebSocketTransport(fn func(t transport.Transport) error, options *websocket.AcceptOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		sock, err := websocket.Accept(w, r, options)
@@ -60,8 +59,7 @@ func WebSocketTransport(fn func(t transport.Transport) error, options *websocket
 			return
 		}
 
-		ctx, cancel := context.WithCancelCause(r.Context())
-		t := transport.SocketJSON(ctx, sock)
+		t, cancel := transport.SocketJSON(r.Context(), sock)
 		err = fn(t)
 		cancel(err)
 	}
