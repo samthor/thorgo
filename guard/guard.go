@@ -15,48 +15,77 @@ type guardImpl[Token comparable, Key any] struct {
 }
 
 type tokenData[Token comparable, Key any] struct {
-	stop     func() bool
-	seq      int
 	sessions map[*guardSession[Token, Key]]struct{}
+
+	refreshCh  chan struct{}   // closed when a new shutdownCh is available
+	shutdownCh <-chan struct{} // closed by user
 }
 
-func (g *guardImpl[Token, Key]) ProvideToken(t Token, expiry time.Time) {
-	duration := time.Until(expiry)
-
+func (g *guardImpl[Token, Key]) ProvideToken(t Token, shutdown <-chan struct{}) {
 	g.tokenLock.Lock()
-	defer g.tokenLock.Unlock()
 
 	td, ok := g.tokens[t]
-	if !ok {
-		td = &tokenData[Token, Key]{
-			sessions: map[*guardSession[Token, Key]]struct{}{},
+	if ok {
+		if shutdown != td.shutdownCh {
+			close(td.refreshCh)
+			td.refreshCh = make(chan struct{})
+			td.shutdownCh = shutdown
 		}
-		g.tokens[t] = td
-	} else {
-		if !td.stop() {
-			td.seq++
-		}
+		g.tokenLock.Unlock()
+		return
 	}
 
-	expectedSeq := td.seq
-	timer := time.AfterFunc(duration, func() {
-		g.expireToken(t, expectedSeq)
-	})
-	td.stop = timer.Stop
+	td = &tokenData[Token, Key]{
+		sessions:   map[*guardSession[Token, Key]]struct{}{},
+		refreshCh:  make(chan struct{}),
+		shutdownCh: shutdown,
+	}
+	g.tokens[t] = td
+
+	go func() {
+		for {
+			shutdown := td.shutdownCh
+			refresh := td.refreshCh
+			g.tokenLock.Unlock()
+
+			select {
+			case <-shutdown:
+				g.tokenLock.Lock()
+				if shutdown != td.shutdownCh {
+					continue // someone changed us (this is dealing with a race): restart
+				}
+
+				g.expireToken(t)
+				return
+
+			case <-refresh:
+				// we got a new td.shutdownCh, grab it under lock
+			}
+			g.tokenLock.Lock()
+		}
+	}()
+
 }
 
-func (g *guardImpl[Token, Key]) expireToken(t Token, expectedSeq int) {
+func (g *guardImpl[Token, Key]) ProvideTokenExpiry(t Token, expiry time.Time) {
+	shutdownCh := make(chan struct{})
+	duration := time.Until(expiry)
+
+	time.AfterFunc(duration, func() {
+		close(shutdownCh)
+	})
+
+	g.ProvideToken(t, shutdownCh)
+}
+
+// expireLock MUST be called under lock, and it releases the lock.
+func (g *guardImpl[Token, Key]) expireToken(t Token) {
 	// find all sessions using us, remove us
 	// if any of those sessions have zero tokens, nuke them
-
-	g.tokenLock.Lock()
 
 	td := g.tokens[t]
 	if td == nil {
 		panic("unknown token expired")
-	}
-	if td.seq != expectedSeq {
-		return // we expired right as we were being stoppewd
 	}
 
 	var invalidSessions []*guardSession[Token, Key]
@@ -119,6 +148,9 @@ func (g *guardImpl[Token, Key]) installSession(gs *guardSession[Token, Key], use
 			// won't block in RunSession, since chan is at least len(use)
 			// in running session behavior, the tokens MUST be consumed
 			gs.ch <- token
+
+			// record use
+			gs.tokens[token] = struct{}{}
 		}
 
 		g.tokenLock.Unlock()
