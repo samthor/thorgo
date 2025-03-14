@@ -40,18 +40,21 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		info, reader = c.Content.Get(p)
 	}
 	if info == nil && !endsWithSlash {
-		checkP := strings.TrimPrefix(p+"/index.html", "/")
-
-		indexExists := c.Content.Exists(checkP)
-		if indexExists {
-			// we know that the next call will add "index.html" to this
-			head.Set("Location", p+"/")
-			w.WriteHeader(http.StatusSeeOther)
-			return
-		}
-
 		if c.ServeNakedHtml {
+			// we have "foo.html", serve directly
 			info, reader = c.Content.Get(p + ".html")
+		}
+		// if we don't have "foo.html", look for "foo/index.html"
+		if info == nil {
+			checkP := strings.TrimPrefix(p+"/index.html", "/")
+
+			indexExists := c.Content.Exists(checkP)
+			if indexExists {
+				// we know that the next call will add "index.html" to this
+				head.Set("Location", p+"/")
+				w.WriteHeader(http.StatusSeeOther)
+				return
+			}
 		}
 	}
 
@@ -69,9 +72,35 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		serve404 = true
-		if c.HtmlNotFoundPath != "" {
-			info, reader = c.Content.Get(c.HtmlNotFoundPath)
+		// search upwards for any maching files
+		if c.SpaMode {
+			curr := r.URL.Path
+			for {
+				update := filepath.Dir(curr)
+				if update == curr {
+					break // can't go further
+				}
+				curr = update // this will be _without slash_
+
+				info, reader = c.Content.Get(curr+"/index.html")
+				if info != nil {
+					break
+				}
+
+				if c.ServeNakedHtml {
+					info, reader = c.Content.Get(curr+".html")
+					if info != nil {
+						break
+					}
+				}
+			}
+		}
+
+		if info == nil {
+			serve404 = true
+			c.HtmlNotFoundPath != "" {
+				info, reader = c.Content.Get(c.HtmlNotFoundPath)
+			}
 		}
 		if info == nil {
 			// no 404 page available
@@ -102,16 +131,16 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// determine if there's a hash we need: query/filename 'wins' over content
 	var effectiveHash string
 	var notModified bool
-	cacheForever := false
+	cacheForeverForUrl := false
 
 	if !serve404 {
 		effectiveHash = info.ContentHash
 		if queryHash := GetQueryHash(r.URL.RawQuery); queryHash != "" {
 			effectiveHash = queryHash
-			cacheForever = true
+			cacheForeverForUrl = true
 		} else if fileHash := GetFileHash(r.URL.Path); fileHash != "" {
 			effectiveHash = fileHash
-			cacheForever = true
+			cacheForeverForUrl = true
 		} else if effectiveHash == "" {
 			// TODO: calculate hash based on content?
 		}
@@ -122,7 +151,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			notModified = r.Header.Get("If-None-Match") == effectiveHash
 
 			// we had a url-based-hash, cache forever
-			if cacheForever {
+			if cacheForeverForUrl {
 				head.Set("Cache-Control", "public, max-age=7776000, immutable")
 			}
 

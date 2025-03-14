@@ -5,6 +5,7 @@ import (
 )
 
 // Seq2Error returns an iter.Seq2 that simply yields a fixed error as its second argument, once.
+// It is valid for err to be nil.
 func Seq2Error[X any](err error) iter.Seq2[X, error] {
 	return func(yield func(X, error) bool) {
 		var x X

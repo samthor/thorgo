@@ -11,13 +11,8 @@ type nonceKey struct {
 	_ int
 }
 
-type LGroup[Init any] interface {
-	Join(context.Context, Init) bool
-	Register(func(context.Context, Init) error)
-	Done() <-chan struct{}
-}
-
 // NewLGroup creates a new LGroup which manages the lifecycles of contexts and helper functions over them.
+// It calls the passed cancel function when complete.
 // The caller must eventually call start(); to do otherwise leaks.
 // The start() method allows setup/join before kickoff, that way the LGroup doesn't start dead.
 func NewLGroup[Init any](cancel context.CancelCauseFunc) (group LGroup[Init], start func()) {

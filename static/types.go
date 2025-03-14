@@ -41,14 +41,18 @@ type ServeFs struct {
 	AddPrefix string
 
 	// Normally, no files "foo.html" are served. This allows them to be served at "foo", without a trailing slash.
-	// If "foo.html" AND "foo/index.html" exist, only the latter will be served.
+	// If "foo.html" AND "foo/index.html" exist, "/foo" will load the former, and "/foo/" will load the latter.
 	ServeNakedHtml bool
 
 	// AllowFrame controls the X-Frame-Options header.
 	AllowFrame bool
 
-	// HtmlNotFoundPath is loaded from Content if we think this is a missing page (with a trailing slash). It does not have AddPrefix applied to it.
+	// HtmlNotFoundPath is loaded from Content if we think this is a missing page (with a trailing slash).
+	// It does not have AddPrefix applied to it (in case it's "outside" normal serving code).
 	HtmlNotFoundPath string
+
+	// SpaMode will search upwards from a missing probably-HTML page for an index (or correctly named, if ServeNakedHtml is enabled) file and serve this with a 200 response.
+	SpaMode bool
 
 	// InsertHtmlHash controls whether a short `<!--:<hash>:-->` is added to each served HTML page.
 	InsertHtmlHash bool
