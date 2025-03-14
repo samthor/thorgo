@@ -82,13 +82,13 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				}
 				curr = update // this will be _without slash_
 
-				info, reader = c.Content.Get(curr+"/index.html")
+				info, reader = c.Content.Get(curr + "/index.html")
 				if info != nil {
 					break
 				}
 
 				if c.ServeNakedHtml {
-					info, reader = c.Content.Get(curr+".html")
+					info, reader = c.Content.Get(curr + ".html")
 					if info != nil {
 						break
 					}
@@ -98,7 +98,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if info == nil {
 			serve404 = true
-			c.HtmlNotFoundPath != "" {
+			if c.HtmlNotFoundPath != "" {
 				info, reader = c.Content.Get(c.HtmlNotFoundPath)
 			}
 		}
@@ -172,7 +172,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			IsHtml:       isHtml,
 			IsHead:       r.Method == http.MethodHead,
 			NotModified:  notModified,
-			CacheForever: cacheForever,
+			CacheForever: cacheForeverForUrl,
 		})
 		if etag := head.Get("ETag"); etag != "" && r.Header.Get("If-None-Match") == etag {
 			// maybe UpdateHeader set ETag
