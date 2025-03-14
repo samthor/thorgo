@@ -85,11 +85,11 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if update == curr {
 					break // can't go further
 				}
-				log.Printf("spaMode checking: %v (was %v)", update, curr)
 				curr = update // this will be _without slash_
 
 				checkIndex := curr + "/index.html"
 				if checkIndex == "./index.html" {
+					// filePath.Dir of "randomString" is always ".", so check for it
 					checkIndex = "index.html"
 				}
 				info, reader = c.Content.Get(checkIndex)

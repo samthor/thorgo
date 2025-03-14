@@ -11,6 +11,7 @@ var (
 )
 
 // GetQueryHash matches a complete input to whether it looks like a long-term hash.
+// This matches only if the ENTIRE rawQuery is the regexp; anything with a = is ignored.
 func GetQueryHash(rawQuery string) string {
 	match := reHash.FindStringIndex(rawQuery)
 	if match == nil {
@@ -23,6 +24,7 @@ func GetQueryHash(rawQuery string) string {
 }
 
 // GetFileHash looks for a hash as a suffix to a file (e.g, "foo-JK1llaO.js").
+// This looks for a suffix starting with '-' or '.', but not the extension.
 func GetFileHash(filename string) string {
 	out := reFileHash.FindStringSubmatch(filename)
 	if out == nil {
