@@ -23,6 +23,11 @@ type futureImpl[T any] struct {
 }
 
 func (f *futureImpl[T]) Wait(ctx context.Context) (res T, err error) {
+	if ctx.Err() != nil {
+		// reminder to self: select {} chooses a random choice, have to do this first
+		err = ctx.Err()
+		return
+	}
 	select {
 	case <-ctx.Done():
 		err = ctx.Err()

@@ -11,9 +11,7 @@ func TestFuture(t *testing.T) {
 
 	nestedCtx, cancel := context.WithCancel(ctx)
 	f, resolve := New[int]()
-
 	cancel()
-	<-nestedCtx.Done() // TODO: sometimes we need to block for this???
 
 	_, err := f.Wait(nestedCtx)
 	if err != context.Canceled {
@@ -21,9 +19,9 @@ func TestFuture(t *testing.T) {
 	}
 
 	resolve(123, nil)
-	_, err = f.Wait(nestedCtx)
+	v, err := f.Wait(nestedCtx)
 	if err != context.Canceled {
-		t.Errorf("expected Canceled to be triggered first, was: %v", err)
+		t.Errorf("expected Canceled to be triggered first, was: %v (value=%v)", err, v)
 	}
 
 	val, err := f.Wait(ctx)
