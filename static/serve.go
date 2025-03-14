@@ -17,6 +17,8 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var isHtml bool
+
 	serve404 := false
 
 	var endsWithSlash bool
@@ -34,7 +36,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	head := w.Header()
 
 	var info *FileInfo
-	var reader io.Reader
+	var reader io.ReadCloser
 	if !serve404 && c.Content != nil {
 		// guard reading content if we had a "bad url" (i.e., ends with "/index.html")
 		info, reader = c.Content.Get(p)
@@ -43,6 +45,9 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if c.ServeNakedHtml {
 			// we have "foo.html", serve directly
 			info, reader = c.Content.Get(p + ".html")
+			if info != nil {
+				isHtml = true
+			}
 		}
 		// if we don't have "foo.html", look for "foo/index.html"
 		if info == nil {
@@ -74,22 +79,29 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		// search upwards for any maching files
 		if c.SpaMode {
-			curr := r.URL.Path
+			curr := p
 			for {
 				update := filepath.Dir(curr)
 				if update == curr {
 					break // can't go further
 				}
+				log.Printf("spaMode checking: %v (was %v)", update, curr)
 				curr = update // this will be _without slash_
 
-				info, reader = c.Content.Get(curr + "/index.html")
+				checkIndex := curr + "/index.html"
+				if checkIndex == "./index.html" {
+					checkIndex = "index.html"
+				}
+				info, reader = c.Content.Get(checkIndex)
 				if info != nil {
+					isHtml = true
 					break
 				}
 
-				if c.ServeNakedHtml {
+				if curr != "." && c.ServeNakedHtml {
 					info, reader = c.Content.Get(curr + ".html")
 					if info != nil {
+						isHtml = true
 						break
 					}
 				}
@@ -100,6 +112,9 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			serve404 = true
 			if c.HtmlNotFoundPath != "" {
 				info, reader = c.Content.Get(c.HtmlNotFoundPath)
+				if info != nil {
+					isHtml = true
+				}
 			}
 		}
 		if info == nil {
@@ -122,11 +137,16 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ct := info.ContentType
 	if ct == "" {
 		ct = mime.TypeByExtension(filepath.Ext(p))
+		if ct == "" && isHtml {
+			ct = "text/html"
+		}
 	}
 	if ct != "" {
 		head.Set("Content-Type", ct)
+		if !isHtml {
+			isHtml = ct == "text/html" || strings.HasPrefix(ct, "text/html;")
+		}
 	}
-	isHtml := ct == "text/html" || strings.HasPrefix(ct, "text/html;")
 
 	// determine if there's a hash we need: query/filename 'wins' over content
 	var effectiveHash string
@@ -195,6 +215,7 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return // don't serve bytes
 	}
 
+	defer reader.Close()
 	_, err := io.Copy(w, reader)
 	if err != nil {
 		log.Printf("couldn't write bytes: p=%v %v", p, err)
