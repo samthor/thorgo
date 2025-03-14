@@ -37,6 +37,9 @@ type Content interface {
 type ServeFs struct {
 	Content Content
 
+	// QueryHash controls whether the query is searched for a hash-like structure (to mark immutable).
+	QueryHash bool
+
 	// AddPrefix is added to all paths before being checked inside Content.
 	AddPrefix string
 

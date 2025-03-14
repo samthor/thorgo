@@ -155,13 +155,20 @@ func (c *ServeFs) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if !serve404 {
 		effectiveHash = info.ContentHash
-		if queryHash := GetQueryHash(r.URL.RawQuery); queryHash != "" {
-			effectiveHash = queryHash
-			cacheForeverForUrl = true
-		} else if fileHash := GetFileHash(r.URL.Path); fileHash != "" {
+
+		if fileHash := GetFileHash(r.URL.Path); fileHash != "" {
 			effectiveHash = fileHash
 			cacheForeverForUrl = true
-		} else if effectiveHash == "" {
+		}
+
+		if effectiveHash == "" && c.QueryHash {
+			if queryHash := GetQueryHash(r.URL.RawQuery); queryHash != "" {
+				effectiveHash = queryHash
+				cacheForeverForUrl = true
+			}
+		}
+
+		if effectiveHash == "" {
 			// TODO: calculate hash based on content?
 		}
 
