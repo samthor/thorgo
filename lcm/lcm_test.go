@@ -221,7 +221,7 @@ func TestJoinTask(t *testing.T) {
 	failCh := make(chan struct{})
 
 	m := NewWithContext(t.Context(), func(b string, s Status[any]) (string, error) {
-		s.JoinTask(func(ctx context.Context, a any) error {
+		s.JoinTask(func(ctx context.Context, ch <-chan bool, a any) error {
 			t.Errorf("should not join; err in setup")
 			<-failCh
 			return nil

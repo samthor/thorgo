@@ -50,8 +50,8 @@ func NewWithContext[Key comparable, Object, Init any](
 		if o.joinTask != nil {
 			actualBuild := build
 			build = func(k Key, s Status[Init]) (Object, error) {
-				s.JoinTask(func(ctx context.Context, i Init) error {
-					return o.joinTask(ctx)
+				s.JoinTask(func(ctx context.Context, shutdownCh <-chan bool, i Init) error {
+					return o.joinTask(ctx, shutdownCh)
 				})
 				return actualBuild(k, s)
 			}
@@ -311,14 +311,27 @@ func (s *statusImpl[Init]) After(fn func() error) (stop func() bool) {
 	}
 }
 
-func (s *statusImpl[Init]) JoinTask(fn func(context.Context, Init) error) {
+func (s *statusImpl[Init]) JoinTask(fn func(context.Context, <-chan bool, Init) error) {
 	s.lg.Register(func(ctx context.Context, i Init) error {
 		select {
 		case <-s.Context().Done():
 			return nil // don't start if we cancelled (e.g., thing failed to create)
 		default:
 		}
-		return fn(ctx, i)
+
+		shutdownCh := make(chan bool, 1)
+
+		go func() {
+			select {
+			case <-s.Context().Done():
+				// the outer ctx shut down (basically: error), just close
+			case <-ctx.Done():
+				shutdownCh <- true // the user ctx shut down (normal operation)
+			}
+			close(shutdownCh)
+		}()
+
+		return fn(ctx, shutdownCh, i)
 	})
 }
 

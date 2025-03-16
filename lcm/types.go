@@ -19,7 +19,8 @@ type Status[Init any] interface {
 	// This is run in its own goroutine and blocks shutdown until completion; a normal use is to wait on [context.Context.Done] and do cleanup tasks once done.
 	// All registered methods may run in parallel.
 	// Notably this ensures the managed object stays alive during context shutdown: [context.AfterFunc] doesn't do this on its own.
-	JoinTask(func(context.Context, Init) error)
+	// The passed channel fires when the outer context fails (false/close), or the user context stops (true).
+	JoinTask(func(context.Context, <-chan bool, Init) error)
 
 	// Task creates an immediate task that is started in a goroutine after the object is successfully created.
 	// It will be deferred until the builder function first returns (or not called if this errors).
