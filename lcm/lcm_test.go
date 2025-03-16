@@ -239,4 +239,50 @@ func TestJoinTask(t *testing.T) {
 		t.Errorf("got failCh")
 	case <-time.After(time.Millisecond * 2):
 	}
+
+	// now try outer err before inner shutdown
+
+	dieCh := make(chan struct{})
+	shutdownRedirectCh := make(chan struct{})
+	awakeLatchCh := make(chan struct{})
+
+	m = NewWithContext(t.Context(), func(key string, s Status[any]) (string, error) {
+		s.JoinTask(func(ctx context.Context, shutdownCh <-chan bool, arg any) error {
+			close(awakeLatchCh)
+			for range shutdownCh {
+				t.Errorf("should never get 'normal' shutdown")
+			}
+			close(shutdownRedirectCh)
+			return nil
+		})
+
+		s.Task(func(stop <-chan struct{}) error {
+			select {
+			case <-stop:
+				return nil
+			case <-dieCh:
+				return errExpected
+			}
+		})
+
+		return key, nil
+	})
+
+	out, runCtx, err := m.Run(t.Context(), "x", nil)
+	if err != nil || out != "x" {
+		t.Errorf("could not join valid lcm, err=%v key=%v", err, out)
+	}
+	<-awakeLatchCh
+
+	close(dieCh)
+	<-runCtx.Done()
+
+	select {
+	case _, ok := <-shutdownRedirectCh:
+		if ok {
+			t.Errorf("expected shutdownRedirectCh close, was ok=%v", ok)
+		}
+	case <-time.After(time.Millisecond):
+		t.Errorf("expected shutdownRedirectCh close")
+	}
 }

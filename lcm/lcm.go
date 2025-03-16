@@ -324,9 +324,10 @@ func (s *statusImpl[Init]) JoinTask(fn func(context.Context, <-chan bool, Init) 
 		go func() {
 			select {
 			case <-s.Context().Done():
-				// the outer ctx shut down (basically: error), just close
+				// the outer ctx shut down first (basically: error), just close
 			case <-ctx.Done():
-				shutdownCh <- true // the user ctx shut down (normal operation)
+				shutdownCh <- true   // the user ctx shut down (normal operation)
+				<-s.Context().Done() // now wait for outer ctx
 			}
 			close(shutdownCh)
 		}()
