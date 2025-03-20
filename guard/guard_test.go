@@ -20,6 +20,7 @@ func TestGuard(t *testing.T) {
 	if err != nil {
 		t.Errorf("zero tokens must not err")
 	}
+	defer s.Stop()
 	select {
 	case _, ok := <-s.TokenCh():
 		if ok {
@@ -43,6 +44,7 @@ func TestGuard(t *testing.T) {
 	if err != nil {
 		t.Errorf("must not err")
 	}
+	defer s.Stop()
 	if checkCalls.Load() != 1 {
 		t.Errorf("expected one check call")
 	}

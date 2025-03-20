@@ -242,7 +242,7 @@ func (gs *guardSession[Token, Key]) Stop() {
 	}()
 
 	gs.lock.Lock()
-	defer gs.lock.Lock()
+	defer gs.lock.Unlock()
 	if !gs.stopped {
 		gs.stopped = true
 		close(gs.ch)
