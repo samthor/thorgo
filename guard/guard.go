@@ -7,7 +7,6 @@ import (
 )
 
 type guardImpl[Token comparable, Key any] struct {
-	ctx   context.Context
 	check CheckFunc[Token, Key]
 
 	tokenLock sync.RWMutex
@@ -71,9 +70,7 @@ func (g *guardImpl[Token, Key]) ProvideTokenExpiry(t Token, expiry time.Time) {
 	shutdownCh := make(chan struct{})
 	duration := time.Until(expiry)
 
-	time.AfterFunc(duration, func() {
-		close(shutdownCh)
-	})
+	time.AfterFunc(duration, func() { close(shutdownCh) })
 
 	g.ProvideToken(t, shutdownCh)
 }
@@ -117,66 +114,57 @@ func (g *guardImpl[Token, Key]) expireToken(t Token) {
 	for _, gs := range invalidSessions {
 		go func() {
 			// only we have "gs" reference here, the lock is just for user-facing stuff
-			gs.lock.Lock()
-			if gs.stopped {
-				gs.lock.Unlock()
-				return // don't install again
+
+			select {
+			case <-gs.derivedCtx.Done():
+				return // don't install again, user marked us as done
+			default:
 			}
 
-			gs.lock.Unlock()
-			// we unlock here because g.check might take "time", and the user of gs might still want to look at it
-			use, err := g.check(g.ctx, gs.key, tokens)
-			gs.lock.Lock()
-			if err != nil {
-				gs.err = err
-				// use should be nil with err; make sure anyway, installSession will close our ch
-				use = nil
-			}
-
-			// check stopped agian
-			if !gs.stopped {
+			use, err := g.check(gs.derivedCtx, gs.key, tokens)
+			if err != nil || len(use) == 0 {
+				gs.cancel(err)
+				gs.Stop()
+			} else {
 				g.installSession(gs, use)
 			}
-			gs.lock.Unlock()
 		}()
 	}
 }
 
 // installSession must NOT be held under tokenLock.
 func (g *guardImpl[Token, Key]) installSession(gs *guardSession[Token, Key], use []Token) {
-	valid := make([]Token, 0, len(use))
+	var anyValid bool
 
-	if len(use) > 0 {
-		g.tokenLock.Lock()
+	g.tokenLock.Lock()
 
-		for _, token := range use {
-			td, ok := g.tokens[token]
-			if !ok {
-				// handles both expiry _and_ caller gave us a weird token
-				continue
-			}
-			td.sessions[gs] = struct{}{}
-			valid = append(valid, token)
-
-			// won't block in RunSession, since chan is at least len(use)
-			// in running session behavior, the tokens MUST be consumed
-			gs.ch <- token
-
-			// record use
-			gs.tokens[token] = struct{}{}
+	for _, token := range use {
+		td, ok := g.tokens[token]
+		if !ok {
+			// handles both expiry _and_ caller gave us an unknown token
+			continue
 		}
+		td.sessions[gs] = struct{}{}
+		anyValid = true
 
-		g.tokenLock.Unlock()
+		// record use
+		gs.tokens[token] = struct{}{}
 	}
 
-	if len(valid) == 0 && !gs.stopped {
-		// not referenced anywhere, we can close
-		gs.stopped = true
-		close(gs.ch)
+	// inform that there's new tokens (in a non-blocking way)
+	if !anyValid {
+		gs.Stop()
+	} else if !gs.tokenUpdateChClosed {
+		select {
+		case gs.tokenUpdateCh <- struct{}{}:
+		default:
+		}
 	}
+
+	g.tokenLock.Unlock()
 }
 
-func (g *guardImpl[Token, Key]) RunSession(key Key) (Session[Token], error) {
+func (g *guardImpl[Token, Key]) RunSession(ctx context.Context, key Key) (Session[Token], error) {
 	// take slice that we can use (CheckSession might take a while)
 	g.tokenLock.RLock()
 	tokens := make([]Token, 0, len(g.tokens))
@@ -185,66 +173,73 @@ func (g *guardImpl[Token, Key]) RunSession(key Key) (Session[Token], error) {
 	}
 	g.tokenLock.RUnlock()
 
-	var use []Token
-	if len(tokens) > 0 {
-		var err error
-		use, err = g.check(g.ctx, key, tokens)
-		if err != nil {
-			return nil, err
-		}
+	use, err := g.check(ctx, key, tokens) // always called even with zero tokens
+	if err != nil {
+		return nil, err
 	}
 
-	// buffer chan for the use size: that way we can send them all here
-	ch := make(chan Token, len(use))
+	derivedCtx, cancel := context.WithCancelCause(ctx)
+
+	tokenUpdateCh := make(chan struct{}, 1)
 	gs := &guardSession[Token, Key]{
-		key:    key,
-		tokens: map[Token]struct{}{},
-		ch:     ch,
+		key:           key,
+		derivedCtx:    derivedCtx,
+		cancel:        cancel,
+		tokens:        map[Token]struct{}{},
+		tokenUpdateCh: tokenUpdateCh,
 	}
+
 	g.installSession(gs, use)
 
 	return gs, nil
 }
 
-func NewGuard[Token comparable, Key any](ctx context.Context, check CheckFunc[Token, Key]) Guard[Token, Key] {
+func New[Token comparable, Key any](check CheckFunc[Token, Key]) Guard[Token, Key] {
 	return &guardImpl[Token, Key]{
 		check:  check,
-		ctx:    ctx,
 		tokens: map[Token]*tokenData[Token, Key]{},
 	}
 }
 
 type guardSession[Token comparable, Key any] struct {
-	key    Key
-	tokens map[Token]struct{}
-	ch     chan Token
+	key        Key
+	derivedCtx context.Context
+	cancel     context.CancelCauseFunc
 
-	lock    sync.Mutex
-	stopped bool
-	err     error
+	tokenLock           sync.RWMutex
+	tokens              map[Token]struct{}
+	tokenUpdateCh       chan struct{} // simply fired when new tokens are available
+	tokenUpdateChClosed bool
 }
 
-func (gs *guardSession[Token, Key]) Err() error {
-	gs.lock.Lock()
-	defer gs.lock.Unlock()
-	return gs.err
+func (gs *guardSession[Token, Key]) Context() context.Context {
+	return gs.derivedCtx
 }
 
-func (gs *guardSession[Token, Key]) TokenCh() <-chan Token {
-	return gs.ch
+func (gs *guardSession[Token, Key]) UpdateCh() <-chan struct{} {
+	return gs.tokenUpdateCh
 }
 
 func (gs *guardSession[Token, Key]) Stop() {
-	go func() {
-		for range gs.ch {
-			// drain ch (maybe the caller gave up listening to Stop)
-		}
-	}()
+	// TODO: if a token never expires, the session will never be truly GC'ed
+	gs.cancel(nil)
 
-	gs.lock.Lock()
-	defer gs.lock.Unlock()
-	if !gs.stopped {
-		gs.stopped = true
-		close(gs.ch)
+	gs.tokenLock.Lock()
+	defer gs.tokenLock.Unlock()
+
+	if !gs.tokenUpdateChClosed {
+		close(gs.tokenUpdateCh)
+		gs.tokenUpdateChClosed = true
 	}
+}
+
+func (gs *guardSession[Token, Key]) Tokens() []Token {
+	gs.tokenLock.RLock()
+	defer gs.tokenLock.RUnlock()
+
+	out := make([]Token, 0, len(gs.tokens))
+	for k := range gs.tokens {
+		out = append(out, k)
+	}
+	return out
 }

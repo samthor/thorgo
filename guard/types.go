@@ -22,17 +22,19 @@ type Guard[Token comparable, Key any] interface {
 	// Key is just passed to CheckFunc; it is not actually a map key, many sessions can start for the same key.
 	// The channel within Session[Token] must be read for token updates until closed, or the Guard will deadlock.
 	// It is closed when there are no more valid tokens (including immediately).
-	RunSession(key Key) (Session[Token], error)
+	RunSession(ctx context.Context, key Key) (Session[Token], error)
 }
 
 type Session[Token any] interface {
-	// Stop shuts down this session.
+	// Context provides a derived context which cancels when tokens are no longer valid.
+	Context() context.Context
+
+	// Stop shuts down this session and cancels the related context.
 	Stop()
 
-	// Err returns the error (if any, this may be nil) after TokenCh is closed.
-	Err() error
+	// UpdateCh returns a chan written in a non-blocking way when tokens change.
+	UpdateCh() <-chan struct{}
 
-	// TokenCh provides the active tokens for this session, and is closed when there are no more valid tokens and the session has shutdown.
-	// This must be read or Guard may deadlock.
-	TokenCh() <-chan Token
+	// Tokens returns the current tokens used for this Session.
+	Tokens() []Token
 }
