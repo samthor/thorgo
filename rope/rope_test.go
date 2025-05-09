@@ -6,16 +6,46 @@ import (
 	"testing"
 )
 
+// 10000k => 2717967250 ns/op (2717.97ms/run)
+//  5000k => 1268466084 ns/op (1268.47ms/run)
+//  1000k =>  204246167 ns/op  (204.25ms/run)
+//   500k =>   90385517 ns/op   (90.39ms/run)
+//   100k =>   16894702 ns/op   (16.89ms/run)
+
+const (
+	benchOps     = 500_000
+	deleteOddsOf = 20
+)
+
 func BenchmarkRope(b *testing.B) {
+	ops := benchOps * (deleteOddsOf - 1) / deleteOddsOf
+
 	for b.Loop() {
-		ids := []Id{RootId}
+		ids := make([]Id, 0, ops)
+		ids = append(ids, RootId)
 		r := New[struct{}]()
 
-		for j := 0; j < 500_000; j++ {
-			choice := rand.IntN(len(ids))
-			afterId := ids[choice]
-			newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
-			r.Find(newId)
+		for j := 0; j < benchOps; j++ {
+
+			if len(ids) <= 2 || rand.IntN(deleteOddsOf) != 0 {
+				// insert case
+				choice := rand.IntN(len(ids))
+				afterId := ids[choice]
+				newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
+				r.Find(newId)
+
+			} else {
+				// delete case
+				choice := 1 + rand.IntN(len(ids)-2)
+
+				deleteId := ids[choice]
+				last := ids[len(ids)-1]
+				ids = ids[:len(ids)-1]
+				ids[choice] = last
+
+				info := r.Info(deleteId)
+				r.DeleteTo(info.Prev, deleteId)
+			}
 		}
 	}
 }
