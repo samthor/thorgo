@@ -2,6 +2,7 @@ package rope
 
 import (
 	"fmt"
+	"iter"
 	"log"
 	"strings"
 )
@@ -279,7 +280,7 @@ func (r *ropeImpl[T]) rseekNodes(id Id) []*ropeNode[T] {
 
 // stepsTo counts the steps from the 'deeper' node to the lower node.
 // This is dangerous with unknown arguments because it might just run forever.
-func (r *ropeImpl[T]) stepsTo(from, to *ropeNode[T], depth int) (count int) {
+func stepsTo[T any](from, to *ropeNode[T], depth int) (count int) {
 	for from != to {
 		count++
 		from = from.levels[depth].prev
@@ -302,6 +303,7 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 	if anodes == nil {
 		return
 	}
+	// TODO: this could be faster because the second rseek could just step until a match
 	bnodes := r.rseekNodes(b)
 	if bnodes == nil {
 		return
@@ -315,8 +317,8 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 		i--
 	}
 
-	astep := r.stepsTo(anodes[i], target, i)
-	bstep := r.stepsTo(bnodes[i], target, i)
+	astep := stepsTo(anodes[i], target, i)
+	bstep := stepsTo(bnodes[i], target, i)
 	return astep - bstep, true
 }
 
@@ -344,7 +346,7 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 			}
 
 			// mid node 'before us'
-			el := &e.levels[i]
+			el := e.levels[i]
 			nl.subtreesize += el.subtreesize - e.len
 			c := el.next
 			if c != nil {
@@ -355,6 +357,27 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 
 		if e.id == untilId {
 			return
+		}
+	}
+}
+
+func (r *ropeImpl[T]) Iter(afterId Id) iter.Seq[Id] {
+	return func(yield func(Id) bool) {
+		e := r.byId[afterId]
+		if e == nil {
+			return
+		}
+
+		for {
+			next := e.levels[0].next
+			if next == nil {
+				return
+			}
+
+			if !yield(next.id) {
+				return
+			}
+			e = next
 		}
 	}
 }

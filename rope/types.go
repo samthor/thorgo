@@ -2,6 +2,10 @@
 
 package rope
 
+import (
+	"iter"
+)
+
 var (
 	// RootId is the zero ID for all ropes.
 	RootId = Id(0)
@@ -19,6 +23,7 @@ type Info[T any] struct {
 
 // Rope is a skip list.
 // It supports zero-length entries.
+// It is not goroutine-safe.
 type Rope[T any] interface {
 	// Returns the total sum of the parts of the rope. O(1).
 	Len() int
@@ -55,6 +60,9 @@ type Rope[T any] interface {
 
 	// DeleteTo deletes after the given ID until the target Id.
 	// Pass zero/root for all content after.
-	//  Costs ~O(logn+m), where m is the number of nodes being deleted.
+	// Costs ~O(logn+m), where m is the number of nodes being deleted.
 	DeleteTo(afterId, untilId Id)
+
+	// Iter reads IDs from after the given Id.
+	Iter(afterId Id) iter.Seq[Id]
 }

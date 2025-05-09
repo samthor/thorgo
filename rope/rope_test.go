@@ -105,6 +105,14 @@ func TestRope(t *testing.T) {
 			t.Errorf("bad cmp for ids: %v", cmp)
 		}
 
+		var out []Id
+		for id := range r.Iter(RootId) {
+			out = append(out, id)
+		}
+		if !reflect.DeepEqual(out, []Id{helloId, thereId}) {
+			t.Errorf("bad read")
+		}
+
 		// delete first
 		r.DeleteTo(0, helloId)
 		if r.Len() != 6 {
