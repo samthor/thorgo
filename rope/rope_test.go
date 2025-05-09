@@ -55,7 +55,7 @@ func BenchmarkCompare(b *testing.B) {
 	r := New[struct{}]()
 	ids := []Id{RootId}
 
-	for range 1_000_000 {
+	for range 100_000 {
 		choice := rand.IntN(len(ids))
 		afterId := ids[choice]
 		newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})

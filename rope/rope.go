@@ -7,11 +7,18 @@ import (
 	"strings"
 )
 
+const (
+	bufferInitCap = 8
+	poolSize      = 8
+)
+
 // New builds a new Rope[T].
 func New[T any]() Rope[T] {
 	out := &ropeImpl[T]{
-		byId:   map[Id]*ropeNode[T]{},
-		height: 1,
+		byId:        map[Id]*ropeNode[T]{},
+		height:      1,
+		rseekBuffer: make([]*ropeNode[T], 1, bufferInitCap),
+		nodePool:    make([]*ropeNode[T], 0, poolSize),
 	}
 
 	out.byId[0] = &out.head
@@ -40,6 +47,9 @@ type ropeImpl[T any] struct {
 	lastId Id
 	byId   map[Id]*ropeNode[T]
 	height int // matches len(head.levels)
+
+	rseekBuffer []*ropeNode[T]
+	nodePool    []*ropeNode[T]
 }
 
 func (r *ropeImpl[T]) DebugPrint() {
@@ -158,17 +168,32 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 
 	r.lastId++
 	newId := r.lastId
-	height := randomHeight()
 
-	levels := make([]ropeLevel[T], height)
-	for i := range levels {
-		levels[i].prev = &r.head
-	}
-	newNode := &ropeNode[T]{
-		data:   data,
-		id:     newId,
-		len:    length,
-		levels: levels,
+	var height int
+	var newNode *ropeNode[T]
+	var levels []ropeLevel[T]
+
+	if len(r.nodePool) != 0 {
+		at := len(r.nodePool) - 1
+		newNode = r.nodePool[at]
+		r.nodePool = r.nodePool[:at]
+
+		newNode.id = newId
+		newNode.data = data
+		newNode.len = length
+		levels = newNode.levels
+		height = len(levels)
+
+	} else {
+		height = randomHeight()
+
+		levels = make([]ropeLevel[T], height)
+		newNode = &ropeNode[T]{
+			data:   data,
+			id:     newId,
+			len:    length,
+			levels: levels,
+		}
 	}
 	r.byId[newId] = newNode
 
@@ -237,6 +262,7 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 				prev:        &r.head,
 				subtreesize: cseek.sub,
 			})
+			r.rseekBuffer = append(r.rseekBuffer, nil)
 			r.height++
 
 			levels[i] = ropeLevel[T]{
@@ -262,7 +288,7 @@ func (r *ropeImpl[T]) rseekNodes(id Id) []*ropeNode[T] {
 		return nil
 	}
 
-	nodes := make([]*ropeNode[T], r.height)
+	nodes := r.rseekBuffer
 	i := 0
 
 	for {
@@ -346,6 +372,11 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 		e := nodes[0].levels[0].next
 		if e == nil {
 			return
+		}
+
+		if len(r.nodePool) != poolSize {
+			e.data = *new(T)
+			r.nodePool = append(r.nodePool, e)
 		}
 
 		delete(r.byId, e.id)
