@@ -55,7 +55,7 @@ func BenchmarkCompare(b *testing.B) {
 	r := New[struct{}]()
 	ids := []Id{RootId}
 
-	for range 100_000 {
+	for range 1_000_000 {
 		choice := rand.IntN(len(ids))
 		afterId := ids[choice]
 		newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
@@ -138,24 +138,24 @@ func TestRope(t *testing.T) {
 		}
 
 		// compare
-		// var cmp int
-		// var ok bool
-		// cmp, ok = r.Compare(helloId, thereId)
-		// if !ok || cmp >= 0 {
-		// 	t.Errorf("bad cmp for ids (should be -1, hello before there): %v", cmp)
-		// }
-		// cmp, ok = r.Compare(thereId, helloId)
-		// if !ok || cmp <= 0 {
-		// 	t.Errorf("bad cmp for ids (should be +1, there not before hello): %v", cmp)
-		// }
-		// cmp, ok = r.Compare(thereId, thereId)
-		// if !ok || cmp != 0 {
-		// 	t.Errorf("bad cmp for ids: %v", cmp)
-		// }
-		// cmp, ok = r.Compare(thereId, Id(-1))
-		// if ok || cmp != 0 {
-		// 	t.Errorf("bad cmp for ids: %v", cmp)
-		// }
+		var cmp int
+		var ok bool
+		cmp, ok = r.Compare(helloId, thereId)
+		if !ok || cmp >= 0 {
+			t.Errorf("bad cmp for ids (should be -1, hello before there): %v", cmp)
+		}
+		cmp, ok = r.Compare(thereId, helloId)
+		if !ok || cmp <= 0 {
+			t.Errorf("bad cmp for ids (should be +1, there not before hello): %v", cmp)
+		}
+		cmp, ok = r.Compare(thereId, thereId)
+		if !ok || cmp != 0 {
+			t.Errorf("bad cmp for ids: %v", cmp)
+		}
+		cmp, ok = r.Compare(thereId, Id(-1))
+		if ok || cmp != 0 {
+			t.Errorf("bad cmp for ids: %v", cmp)
+		}
 
 		var out []Id
 		for id := range r.Iter(RootId) {

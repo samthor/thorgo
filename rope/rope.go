@@ -35,10 +35,10 @@ type ropeNode[T any] struct {
 }
 
 type ropeImpl[T any] struct {
+	head   ropeNode[T]
 	len    int
 	lastId Id
 	byId   map[Id]*ropeNode[T]
-	head   ropeNode[T]
 	height int // matches len(head.levels)
 }
 
@@ -289,12 +289,25 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 		return
 	}
 
-	// this is about 15% faster than the naïve version (rseekNodes for both)
-	curr := r.byId[b]
-	if curr == nil {
+	anode := r.byId[a]
+	bnode := r.byId[b]
+
+	if anode == nil || bnode == nil {
 		return
 	}
-	anodes := r.rseekNodes(a)
+
+	// this is about 15% faster than the naïve version (rseekNodes for both)
+	// swapping might be a touch faster, maybe negligible
+
+	mult := 1
+	if len(anode.levels) < len(bnode.levels) {
+		// swap more levels into anode; seek will be faster
+		mult = -1
+		anode, bnode = bnode, anode
+	}
+
+	curr := bnode
+	anodes := r.rseekNodes(anode.id)
 	if anodes == nil {
 		return
 	}
@@ -306,7 +319,7 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 		for i < ll {
 			// stepped "right" into the previous node tree, so it must be after us
 			if curr == anodes[i] {
-				return +1, true
+				return mult, true
 			}
 			i++
 		}
@@ -315,10 +328,10 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 		curr = curr.levels[ll].prev
 		if curr == anodes[ll] {
 			// stepped "up" into the previous node tree, so must be before us
-			return -1, true
+			return -mult, true
 		} else if curr == &r.head {
 			// stepped "up" to root, so must be after us (we never saw it in walk)
-			return +1, true
+			return mult, true
 		}
 	}
 }
