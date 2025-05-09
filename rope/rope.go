@@ -48,7 +48,7 @@ type ropeImpl[T any] struct {
 	byId   map[Id]*ropeNode[T]
 	height int // matches len(head.levels)
 
-	rseekBuffer []*ropeNode[T]
+	rseekBuffer []*ropeNode[T] // saves about 5% to re-use buffer
 	nodePool    []*ropeNode[T]
 }
 
@@ -374,11 +374,6 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 			return
 		}
 
-		if len(r.nodePool) != poolSize {
-			e.data = *new(T)
-			r.nodePool = append(r.nodePool, e)
-		}
-
 		delete(r.byId, e.id)
 		r.len -= e.len
 
@@ -400,10 +395,25 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 			nl.next = c // when this becomes nil for levels[0], we bail
 		}
 
+		r.returnToPool(e)
 		if e.id == untilId {
 			return
 		}
 	}
+}
+
+func (r *ropeImpl[T]) returnToPool(e *ropeNode[T]) {
+	if len(r.nodePool) == poolSize {
+		return
+	}
+
+	var zero ropeLevel[T]
+	for i := range e.levels {
+		e.levels[i] = zero
+	}
+	e.data = *new(T)
+
+	r.nodePool = append(r.nodePool, e)
 }
 
 func (r *ropeImpl[T]) Iter(afterId Id) iter.Seq[Id] {
