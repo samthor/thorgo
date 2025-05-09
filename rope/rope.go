@@ -278,16 +278,6 @@ func (r *ropeImpl[T]) rseekNodes(id Id) []*ropeNode[T] {
 	}
 }
 
-// stepsTo counts the steps from the 'deeper' node to the lower node.
-// This is dangerous with unknown arguments because it might just run forever.
-func stepsTo[T any](from, to *ropeNode[T], depth int) (count int) {
-	for from != to {
-		count++
-		from = from.levels[depth].prev
-	}
-	return
-}
-
 func (r *ropeImpl[T]) Before(a, b Id) bool {
 	c, _ := r.Compare(a, b)
 	return c < 0
@@ -296,30 +286,41 @@ func (r *ropeImpl[T]) Before(a, b Id) bool {
 func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 	if a == b {
 		_, ok = r.byId[a]
-		return 0, ok
+		return
 	}
 
+	// this is about 15% faster than the naïve version (rseekNodes for both)
+	curr := r.byId[b]
+	if curr == nil {
+		return
+	}
 	anodes := r.rseekNodes(a)
 	if anodes == nil {
 		return
 	}
-	// TODO: this could be faster because the second rseek could just step until a match
-	bnodes := r.rseekNodes(b)
-	if bnodes == nil {
-		return
+
+	// walk up the tree
+	i := 1
+	for {
+		ll := len(curr.levels)
+		for i < ll {
+			// stepped "right" into the previous node tree, so it must be after us
+			if curr == anodes[i] {
+				return +1, true
+			}
+			i++
+		}
+
+		ll--
+		curr = curr.levels[ll].prev
+		if curr == anodes[ll] {
+			// stepped "up" into the previous node tree, so must be before us
+			return -1, true
+		} else if curr == &r.head {
+			// stepped "up" to root, so must be after us (we never saw it in walk)
+			return +1, true
+		}
 	}
-
-	target := &r.head
-	i := r.height - 1
-
-	for i >= 0 && anodes[i] == bnodes[i] {
-		target = anodes[i]
-		i--
-	}
-
-	astep := stepsTo(anodes[i], target, i)
-	bstep := stepsTo(bnodes[i], target, i)
-	return astep - bstep, true
 }
 
 func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {

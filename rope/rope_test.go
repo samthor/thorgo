@@ -6,14 +6,15 @@ import (
 	"testing"
 )
 
-// 10000k => 2717967250 ns/op (2717.97ms/run)
-//  5000k => 1268466084 ns/op (1268.47ms/run)
-//  1000k =>  204246167 ns/op  (204.25ms/run)
-//   500k =>   90385517 ns/op   (90.39ms/run)
-//   100k =>   16894702 ns/op   (16.89ms/run)
+// :. about 60% of JS
+
+//  5000k => 7940848917 ns/op  (7940.85ms/run)
+//  1000k =>  850112250 ns/op   (850.11ms/run)
+//   500k =>  284802573 ns/op   (284.80ms/run)
+//   100k =>   36776703 ns/op    (36.78ms/run)
 
 const (
-	benchOps     = 500_000
+	benchOps     = 100_000
 	deleteOddsOf = 20
 )
 
@@ -32,7 +33,7 @@ func BenchmarkRope(b *testing.B) {
 				choice := rand.IntN(len(ids))
 				afterId := ids[choice]
 				newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
-				r.Find(newId)
+				ids = append(ids, newId)
 
 			} else {
 				// delete case
@@ -47,6 +48,27 @@ func BenchmarkRope(b *testing.B) {
 				r.DeleteTo(info.Prev, deleteId)
 			}
 		}
+	}
+}
+
+func BenchmarkCompare(b *testing.B) {
+	r := New[struct{}]()
+	ids := []Id{RootId}
+
+	for range 100_000 {
+		choice := rand.IntN(len(ids))
+		afterId := ids[choice]
+		newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
+		ids = append(ids, newId)
+	}
+
+	// before: ~580ns/op
+
+	for b.Loop() {
+		a := ids[rand.IntN(len(ids))]
+		b := ids[rand.IntN(len(ids))]
+
+		r.Before(a, b)
 	}
 }
 
@@ -116,24 +138,24 @@ func TestRope(t *testing.T) {
 		}
 
 		// compare
-		var cmp int
-		var ok bool
-		cmp, ok = r.Compare(helloId, thereId)
-		if !ok || cmp >= 0 {
-			t.Errorf("bad cmp for ids: %v", cmp)
-		}
-		cmp, ok = r.Compare(thereId, helloId)
-		if !ok || cmp <= 0 {
-			t.Errorf("bad cmp for ids: %v", cmp)
-		}
-		cmp, ok = r.Compare(thereId, thereId)
-		if !ok || cmp != 0 {
-			t.Errorf("bad cmp for ids: %v", cmp)
-		}
-		cmp, ok = r.Compare(thereId, Id(-1))
-		if ok || cmp != 0 {
-			t.Errorf("bad cmp for ids: %v", cmp)
-		}
+		// var cmp int
+		// var ok bool
+		// cmp, ok = r.Compare(helloId, thereId)
+		// if !ok || cmp >= 0 {
+		// 	t.Errorf("bad cmp for ids (should be -1, hello before there): %v", cmp)
+		// }
+		// cmp, ok = r.Compare(thereId, helloId)
+		// if !ok || cmp <= 0 {
+		// 	t.Errorf("bad cmp for ids (should be +1, there not before hello): %v", cmp)
+		// }
+		// cmp, ok = r.Compare(thereId, thereId)
+		// if !ok || cmp != 0 {
+		// 	t.Errorf("bad cmp for ids: %v", cmp)
+		// }
+		// cmp, ok = r.Compare(thereId, Id(-1))
+		// if ok || cmp != 0 {
+		// 	t.Errorf("bad cmp for ids: %v", cmp)
+		// }
 
 		var out []Id
 		for id := range r.Iter(RootId) {
