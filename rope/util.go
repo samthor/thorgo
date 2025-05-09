@@ -1,17 +1,11 @@
 package rope
 
 import (
+	"math/bits"
 	"math/rand/v2"
 )
 
 func randomHeight() int {
-	height := 1
-	r := rand.Int32()
-
-	for r&1 == 1 {
-		r <<= 1
-		height++
-	}
-
-	return height
+	// min zero, with every extra height at 0.5x chance
+	return 1 + bits.LeadingZeros64(rand.Uint64())
 }

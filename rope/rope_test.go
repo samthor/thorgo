@@ -8,13 +8,13 @@ import (
 
 func BenchmarkRope(b *testing.B) {
 	for b.Loop() {
-		ids := []Id{0}
-		r := New[string]()
+		ids := []Id{RootId}
+		r := New[struct{}]()
 
 		for j := 0; j < 500_000; j++ {
 			choice := rand.IntN(len(ids))
 			afterId := ids[choice]
-			newId := r.InsertAfter(afterId, "", rand.IntN(16))
+			newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
 			r.Find(newId)
 		}
 	}
@@ -30,8 +30,11 @@ func TestRope(t *testing.T) {
 		r := New[string]()
 
 		// insert "hello" and check
-		helloId := r.InsertAfter(0, "hello", 5)
+		helloId := r.InsertAfter(RootId, 5, "hello")
 
+		if r.Count() != 1 {
+			t.Errorf("expected count=1")
+		}
 		if r.Len() != 5 {
 			t.Errorf("expected len=5, was=%v", r.Len())
 		}
@@ -44,9 +47,12 @@ func TestRope(t *testing.T) {
 		}
 
 		// insert " there"
-		thereId := r.InsertAfter(helloId, " there", 6)
+		thereId := r.InsertAfter(helloId, 6, " there")
 		if r.Len() != 11 {
 			t.Errorf("expected len=11, was=%v", r.Len())
+		}
+		if r.Count() != 2 {
+			t.Errorf("expected count=2")
 		}
 
 		thereLookup := r.Info(thereId)
@@ -71,6 +77,12 @@ func TestRope(t *testing.T) {
 		}
 		if id, offset := r.ByPosition(5, true); id != thereId || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, thereId, offset)
+		}
+		if id, offset := r.ByPosition(0, false); id != RootId || offset != 0 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, RootId, offset)
+		}
+		if id, offset := r.ByPosition(0, true); id != helloId || offset != 0 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
 		}
 
 		// compare
@@ -100,6 +112,9 @@ func TestRope(t *testing.T) {
 		}
 		if thereAt = r.Find(thereId); thereAt != 0 {
 			t.Errorf("wrong there")
+		}
+		if r.Count() != 1 {
+			t.Errorf("expected count=1")
 		}
 
 	}
