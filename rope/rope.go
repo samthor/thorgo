@@ -203,7 +203,8 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 		node *ropeNode[T]
 		sub  int
 	}
-	seek := make([]ropeSeek[T], r.height)
+	var seekStack [32]ropeSeek[T] // max randomHeight is 32; using stack is 10-20% faster
+	seek := seekStack[0:r.height]
 	cseek := ropeSeek[T]{
 		node: e,
 		sub:  e.len,

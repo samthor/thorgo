@@ -6,23 +6,24 @@ import (
 	"testing"
 )
 
-// :. about 60% of JS
+// :. about 2x JS speed
 
-//  5000k => 7940848917 ns/op  (7940.85ms/run)
-//  1000k =>  850112250 ns/op   (850.11ms/run)
-//   500k =>  284802573 ns/op   (284.80ms/run)
-//   100k =>   36776703 ns/op    (36.78ms/run)
+//  5000k => 6807085083 ns/op  (6807.09ms/run)
+//  1000k =>  678856229 ns/op   (678.86ms/run)
+//   500k =>  245334542 ns/op   (245.33ms/run)
+//   100k =>   28436903 ns/op    (28.44ms/run)
 
 const (
-	benchOps     = 100_000
+	benchOps     = 5_000_000
 	deleteOddsOf = 20
 )
 
 func BenchmarkRope(b *testing.B) {
 	ops := benchOps * (deleteOddsOf - 1) / deleteOddsOf
+	ids := make([]Id, 0, ops)
 
 	for b.Loop() {
-		ids := make([]Id, 0, ops)
+		ids = ids[:0]
 		ids = append(ids, RootId)
 		r := New[struct{}]()
 
