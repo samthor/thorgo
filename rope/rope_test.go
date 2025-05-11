@@ -14,7 +14,7 @@ import (
 //   100k =>   28436903 ns/op    (28.44ms/run)
 
 const (
-	benchOps     = 5_000_000
+	benchOps     = 100_000
 	deleteOddsOf = 20
 )
 
@@ -179,5 +179,27 @@ func TestRope(t *testing.T) {
 		}
 
 	}
+}
 
+func TestRandomRope(t *testing.T) {
+	ids := make([]Id, 0, 51)
+
+	for i := 0; i < 100; i++ {
+		r := New[string]()
+		ids = ids[:0]
+		ids = append(ids, RootId)
+
+		for j := 0; j < 50; j++ {
+
+			choice := rand.IntN(len(ids))
+			parent := ids[choice]
+
+			length := rand.IntN(4) + 1
+			var s string
+			for range length {
+				s += string(rune('a' + rand.IntN(26)))
+			}
+			r.InsertAfter(parent, length, s)
+		}
+	}
 }

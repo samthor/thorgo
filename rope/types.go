@@ -53,6 +53,9 @@ type Rope[T any] interface {
 	// Costs ~O(logn).
 	Before(a, b Id) bool
 
+	// Iter reads IDs from after the given Id.
+	Iter(afterId Id) iter.Seq2[Id, T]
+
 	// Insert data after the prior Id.
 	// Length must be zero or positive.
 	// Costs ~O(logn).
@@ -62,7 +65,4 @@ type Rope[T any] interface {
 	// Pass zero/root for all content after.
 	// Costs ~O(logn+m), where m is the number of nodes being deleted.
 	DeleteTo(afterId, untilId Id)
-
-	// Iter reads IDs from after the given Id.
-	Iter(afterId Id) iter.Seq[Id]
 }
