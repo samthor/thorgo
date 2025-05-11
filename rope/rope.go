@@ -453,6 +453,8 @@ func (r *ropeImpl[T]) returnToPool(e *ropeNode[T]) {
 }
 
 func (r *ropeImpl[T]) Iter(afterId Id) iter.Seq2[Id, T] {
+	// FIXME: will freak out if deletion during here
+
 	return func(yield func(Id, T) bool) {
 		e := r.byId[afterId]
 		if e == nil {
