@@ -12,43 +12,43 @@ const (
 	maxHeight = 32
 )
 
-// New builds a new Rope[T].
-func New[T any]() Rope[T] {
-	out := &ropeImpl[T]{
-		byId:     map[Id]*ropeNode[T]{},
+// New builds a new Rope[Id, T].
+func New[Id comparable, T any]() Rope[Id, T] {
+	out := &ropeImpl[Id, T]{
+		byId:     map[Id]*ropeNode[Id, T]{},
 		height:   1,
-		nodePool: make([]*ropeNode[T], 0, poolSize),
+		nodePool: make([]*ropeNode[Id, T], 0, poolSize),
 	}
 
-	out.byId[0] = &out.head
-	out.head.levels = make([]ropeLevel[T], 0, maxHeight) // never alloc again
-	out.head.levels = append(out.head.levels, ropeLevel[T]{prev: &out.head})
+	var zeroId Id
+	out.byId[zeroId] = &out.head
+	out.head.levels = make([]ropeLevel[Id, T], 1, maxHeight) // never alloc again
+	out.head.levels[0] = ropeLevel[Id, T]{prev: &out.head}
 	return out
 }
 
-type ropeLevel[T any] struct {
-	next        *ropeNode[T] // can be nil
-	prev        *ropeNode[T] // always set
+type ropeLevel[Id comparable, T any] struct {
+	next        *ropeNode[Id, T] // can be nil
+	prev        *ropeNode[Id, T] // always set
 	subtreesize int
 }
 
-type ropeNode[T any] struct {
+type ropeNode[Id comparable, T any] struct {
 	id     Id
 	len    int
-	levels []ropeLevel[T]
+	levels []ropeLevel[Id, T]
 	data   T
 }
 
-type ropeImpl[T any] struct {
-	head     ropeNode[T]
+type ropeImpl[Id comparable, T any] struct {
+	head     ropeNode[Id, T]
 	len      int
-	lastId   Id
-	byId     map[Id]*ropeNode[T]
+	byId     map[Id]*ropeNode[Id, T]
 	height   int // matches len(head.levels)
-	nodePool []*ropeNode[T]
+	nodePool []*ropeNode[Id, T]
 }
 
-func (r *ropeImpl[T]) DebugPrint() {
+func (r *ropeImpl[Id, T]) DebugPrint() {
 	log.Printf("> rope len=%d heads=%d", r.len, r.height)
 	const pipePart = "|     "
 	const blankPart = "      "
@@ -103,7 +103,7 @@ func (r *ropeImpl[T]) DebugPrint() {
 }
 
 // toString is a helper to render data, only for DebugPrint.
-func (r *ropeImpl[T]) toString(data T) string {
+func (r *ropeImpl[Id, T]) toString(data T) string {
 	type stringable interface {
 		String() string
 	}
@@ -116,15 +116,15 @@ func (r *ropeImpl[T]) toString(data T) string {
 	return ""
 }
 
-func (r *ropeImpl[T]) Len() int {
+func (r *ropeImpl[Id, T]) Len() int {
 	return r.len
 }
 
-func (r *ropeImpl[T]) Count() int {
+func (r *ropeImpl[Id, T]) Count() int {
 	return len(r.byId) - 1
 }
 
-func (r *ropeImpl[T]) Find(id Id) int {
+func (r *ropeImpl[Id, T]) Find(id Id) int {
 	e := r.byId[id]
 	if e == nil {
 		return -1
@@ -142,7 +142,7 @@ func (r *ropeImpl[T]) Find(id Id) int {
 	return pos
 }
 
-func (r *ropeImpl[T]) Info(id Id) (out Info[T]) {
+func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
 	node := r.byId[id]
 	if node == nil {
 		return
@@ -160,7 +160,7 @@ func (r *ropeImpl[T]) Info(id Id) (out Info[T]) {
 	return out
 }
 
-func (r *ropeImpl[T]) ByPosition(position int, biasAfter bool) (id Id, offset int) {
+func (r *ropeImpl[Id, T]) ByPosition(position int, biasAfter bool) (id Id, offset int) {
 	if position < 0 || position > r.len {
 		offset = position
 		return
@@ -190,22 +190,22 @@ outer:
 	return e.id, position
 }
 
-func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
+func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) bool {
 	if length < 0 {
 		panic("must be +ve len")
 	}
 
-	e := r.byId[insertAfterId]
+	e := r.byId[afterId]
 	if e == nil {
-		return 0
+		return false // can't parent to another id
+	}
+	if _, ok := r.byId[newId]; ok {
+		return false // id already exists
 	}
 
-	r.lastId++
-	newId := r.lastId
-
 	var height int
-	var newNode *ropeNode[T]
-	var levels []ropeLevel[T]
+	var newNode *ropeNode[Id, T]
+	var levels []ropeLevel[Id, T]
 
 	if len(r.nodePool) != 0 {
 		at := len(r.nodePool) - 1
@@ -221,8 +221,8 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 	} else {
 		height = randomHeight()
 
-		levels = make([]ropeLevel[T], height)
-		newNode = &ropeNode[T]{
+		levels = make([]ropeLevel[Id, T], height)
+		newNode = &ropeNode[Id, T]{
 			data:   data,
 			id:     newId,
 			len:    length,
@@ -233,13 +233,13 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 
 	// seek to see where it goes
 
-	type ropeSeek[T any] struct {
-		node *ropeNode[T]
+	type ropeSeek[Id comparable, T any] struct {
+		node *ropeNode[Id, T]
 		sub  int
 	}
-	var seekStack [maxHeight]ropeSeek[T] // using stack is 10-20% faster
+	var seekStack [maxHeight]ropeSeek[Id, T] // using stack is 10-20% faster
 	seek := seekStack[0:r.height]
-	cseek := ropeSeek[T]{
+	cseek := ropeSeek[Id, T]{
 		node: e,
 		sub:  e.len,
 	}
@@ -274,7 +274,7 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 			}
 			st := seek[i].sub
 
-			levels[i] = ropeLevel[T]{
+			levels[i] = ropeLevel[Id, T]{
 				next:        nextI,
 				prev:        n,
 				subtreesize: length + nl.subtreesize - st,
@@ -296,14 +296,14 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 			}
 
 			// ensure head has correct total height
-			r.head.levels = append(r.head.levels, ropeLevel[T]{
+			r.head.levels = append(r.head.levels, ropeLevel[Id, T]{
 				next:        newNode,
 				prev:        &r.head,
 				subtreesize: cseek.sub,
 			})
 			r.height++
 
-			levels[i] = ropeLevel[T]{
+			levels[i] = ropeLevel[Id, T]{
 				next:        nil,
 				prev:        &r.head,
 				subtreesize: r.len - cseek.sub + length,
@@ -317,10 +317,10 @@ func (r *ropeImpl[T]) InsertAfter(insertAfterId Id, length int, data T) Id {
 	}
 	r.len += length
 
-	return newId
+	return true
 }
 
-func (r *ropeImpl[T]) rseekNodes(curr *ropeNode[T], target *[maxHeight]*ropeNode[T]) {
+func (r *ropeImpl[Id, T]) rseekNodes(curr *ropeNode[Id, T], target *[maxHeight]*ropeNode[Id, T]) {
 	i := 0
 	for {
 		ll := len(curr.levels)
@@ -335,12 +335,12 @@ func (r *ropeImpl[T]) rseekNodes(curr *ropeNode[T], target *[maxHeight]*ropeNode
 	}
 }
 
-func (r *ropeImpl[T]) Before(a, b Id) bool {
+func (r *ropeImpl[Id, T]) Less(a, b Id) bool {
 	c, _ := r.Compare(a, b)
 	return c < 0
 }
 
-func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
+func (r *ropeImpl[Id, T]) Compare(a, b Id) (cmp int, ok bool) {
 	if a == b {
 		_, ok = r.byId[a]
 		return
@@ -366,7 +366,7 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 
 	curr := bnode
 
-	var anodes [maxHeight]*ropeNode[T]
+	var anodes [maxHeight]*ropeNode[Id, T]
 	r.rseekNodes(anode, &anodes)
 
 	// walk up the tree
@@ -394,13 +394,13 @@ func (r *ropeImpl[T]) Compare(a, b Id) (cmp int, ok bool) {
 	}
 }
 
-func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
+func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) {
 	lookup := r.byId[afterId]
 	if lookup == nil {
 		return
 	}
 
-	var nodes [maxHeight]*ropeNode[T]
+	var nodes [maxHeight]*ropeNode[Id, T]
 	r.rseekNodes(lookup, &nodes)
 
 	for {
@@ -438,12 +438,12 @@ func (r *ropeImpl[T]) DeleteTo(afterId, untilId Id) {
 	}
 }
 
-func (r *ropeImpl[T]) returnToPool(e *ropeNode[T]) {
+func (r *ropeImpl[Id, T]) returnToPool(e *ropeNode[Id, T]) {
 	if len(r.nodePool) == poolSize {
 		return
 	}
 
-	var zero ropeLevel[T]
+	var zero ropeLevel[Id, T]
 	for i := range e.levels {
 		e.levels[i] = zero
 	}
@@ -452,7 +452,7 @@ func (r *ropeImpl[T]) returnToPool(e *ropeNode[T]) {
 	r.nodePool = append(r.nodePool, e)
 }
 
-func (r *ropeImpl[T]) Iter(afterId Id) iter.Seq2[Id, T] {
+func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, T] {
 	// FIXME: will freak out if deletion during here
 
 	return func(yield func(Id, T) bool) {

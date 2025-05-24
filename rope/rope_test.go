@@ -18,14 +18,23 @@ const (
 	deleteOddsOf = 20
 )
 
+var (
+	internalNextId = 0
+)
+
+func nextId() int {
+	internalNextId++
+	return internalNextId
+}
+
 func BenchmarkRope(b *testing.B) {
 	ops := benchOps * (deleteOddsOf - 1) / deleteOddsOf
-	ids := make([]Id, 0, ops)
+	ids := make([]int, 0, ops)
 
 	for b.Loop() {
 		ids = ids[:0]
-		ids = append(ids, RootId)
-		r := New[struct{}]()
+		ids = append(ids, 0)
+		r := New[int, struct{}]()
 
 		for j := 0; j < benchOps; j++ {
 
@@ -33,7 +42,11 @@ func BenchmarkRope(b *testing.B) {
 				// insert case
 				choice := rand.IntN(len(ids))
 				afterId := ids[choice]
-				newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
+
+				newId := nextId()
+				if !r.InsertIdAfter(afterId, newId, rand.IntN(16), struct{}{}) {
+					b.Errorf("couldn't insert")
+				}
 				ids = append(ids, newId)
 
 			} else {
@@ -53,13 +66,17 @@ func BenchmarkRope(b *testing.B) {
 }
 
 func BenchmarkCompare(b *testing.B) {
-	r := New[struct{}]()
-	ids := []Id{RootId}
+	r := New[int, struct{}]()
+	ids := []int{0}
 
 	for range 100_000 {
 		choice := rand.IntN(len(ids))
 		afterId := ids[choice]
-		newId := r.InsertAfter(afterId, rand.IntN(16), struct{}{})
+
+		newId := nextId()
+		if !r.InsertIdAfter(afterId, newId, rand.IntN(16), struct{}{}) {
+			b.Errorf("couldn't insert")
+		}
 		ids = append(ids, newId)
 	}
 
@@ -69,7 +86,7 @@ func BenchmarkCompare(b *testing.B) {
 		a := ids[rand.IntN(len(ids))]
 		b := ids[rand.IntN(len(ids))]
 
-		r.Before(a, b)
+		r.Less(a, b)
 	}
 }
 
@@ -80,10 +97,11 @@ func TestRope(t *testing.T) {
 			return
 		}
 
-		r := New[string]()
+		r := New[int, string]()
 
 		// insert "hello" and check
-		helloId := r.InsertAfter(RootId, 5, "hello")
+		helloId := nextId()
+		r.InsertIdAfter(0, helloId, 5, "hello")
 
 		if r.Count() != 1 {
 			t.Errorf("expected count=1")
@@ -100,7 +118,8 @@ func TestRope(t *testing.T) {
 		}
 
 		// insert " there"
-		thereId := r.InsertAfter(helloId, 6, " there")
+		thereId := nextId()
+		r.InsertIdAfter(helloId, thereId, 6, " there")
 		if r.Len() != 11 {
 			t.Errorf("expected len=11, was=%v", r.Len())
 		}
@@ -114,7 +133,7 @@ func TestRope(t *testing.T) {
 		if thereAt != 5 {
 			t.Errorf("expected thereAt=5, was=%v", thereAt)
 		}
-		if !reflect.DeepEqual(thereLookup, Info[string]{
+		if !reflect.DeepEqual(thereLookup, Info[int, string]{
 			Id:     thereId,
 			Next:   0,
 			Prev:   helloId,
@@ -131,8 +150,8 @@ func TestRope(t *testing.T) {
 		if id, offset := r.ByPosition(5, true); id != thereId || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, thereId, offset)
 		}
-		if id, offset := r.ByPosition(0, false); id != RootId || offset != 0 {
-			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, RootId, offset)
+		if id, offset := r.ByPosition(0, false); id != 0 || offset != 0 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, 0, offset)
 		}
 		if id, offset := r.ByPosition(0, true); id != helloId || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
@@ -153,16 +172,16 @@ func TestRope(t *testing.T) {
 		if !ok || cmp != 0 {
 			t.Errorf("bad cmp for ids: %v", cmp)
 		}
-		cmp, ok = r.Compare(thereId, Id(-1))
+		cmp, ok = r.Compare(thereId, -1)
 		if ok || cmp != 0 {
 			t.Errorf("bad cmp for ids: %v", cmp)
 		}
 
-		var out []Id
-		for id := range r.Iter(RootId) {
+		var out []int
+		for id := range r.Iter(0) {
 			out = append(out, id)
 		}
-		if !reflect.DeepEqual(out, []Id{helloId, thereId}) {
+		if !reflect.DeepEqual(out, []int{helloId, thereId}) {
 			t.Errorf("bad read")
 		}
 
@@ -182,12 +201,12 @@ func TestRope(t *testing.T) {
 }
 
 func TestRandomRope(t *testing.T) {
-	ids := make([]Id, 0, 51)
+	ids := make([]int, 0, 51)
 
 	for i := 0; i < 100; i++ {
-		r := New[string]()
+		r := New[int, string]()
 		ids = ids[:0]
-		ids = append(ids, RootId)
+		ids = append(ids, 0)
 
 		for j := 0; j < 50; j++ {
 
@@ -199,7 +218,9 @@ func TestRandomRope(t *testing.T) {
 			for range length {
 				s += string(rune('a' + rand.IntN(26)))
 			}
-			r.InsertAfter(parent, length, s)
+			if !r.InsertIdAfter(parent, nextId(), length, s) {
+				t.Errorf("couldn't insert")
+			}
 		}
 	}
 }
