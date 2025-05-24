@@ -2,7 +2,6 @@ package cr
 
 import (
 	"iter"
-	"log"
 
 	"github.com/samthor/thorgo/aatree"
 	"github.com/samthor/thorgo/rope"
@@ -18,10 +17,9 @@ func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
 }
 
 type internalNode[Data any, Meta comparable] struct {
-	id     int // high ID
-	extent int // first ID added as a child of this node
-	data   Data
-	meta   Meta
+	id   int // high ID
+	data Data
+	meta Meta
 
 	// del  int
 }
@@ -105,11 +103,6 @@ func (s *serverCrImpl[Data, Meta]) maybeMergeWithLeft(id int) {
 		return
 	}
 
-	if leftLookup.Data.extent != 0 && leftLookup.Data.extent != id {
-		// TODO: left shouldn't have extent (unless it's "us")
-		log.Fatalf("id=%d left=%d had extent=%d", id, leftLookup.Id, leftLookup.Data.extent)
-	}
-
 	right.data = append(leftLookup.Data.data, right.data...)
 
 	// delete both from rope
@@ -126,22 +119,14 @@ func (s *serverCrImpl[Data, Meta]) Len() int {
 	return s.len
 }
 
-func (s *serverCrImpl[Data, Meta]) Extent(id int) int {
-	if id == 0 {
-		// you can't delete zero, but let's pretend we can
-		return s.r.LastId()
-	}
-
-	node, _ := s.lookupNode(id)
+func (s *serverCrImpl[Data, Meta]) PositionFor(id int) int {
+	node, at := s.lookupNode(id)
 	if node == nil {
 		return -1
 	}
 
-	// TODO: this might be O(n). I think we can forever cache this?
-	for node.extent != 0 {
-		node, _ = s.lookupNode(node.extent)
-	}
-	return node.id
+	nodePosition := s.r.Find(node.id)
+	return nodePosition + at
 }
 
 func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
@@ -163,14 +148,12 @@ func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Me
 	if shouldAppend {
 		// we can modify left node directly
 		node := lookup.Data
-		if node.extent != 0 {
-			panic("we're directly after, should not have extent")
-		}
 
 		// remove old
 		s.idTree.Remove(node)
 		s.r.DeleteTo(lookup.Prev, after)
 
+		node.id = id
 		node.data = append(node.data, data...)
 
 		// append new
@@ -178,12 +161,6 @@ func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Me
 		s.r.InsertIdAfter(lookup.Prev, id, len(node.data), node)
 
 	} else {
-		// store extent on parent node (for deletion tracking)
-		// ...not on root node, can't be deleted
-		if after != 0 && lookup.Data.extent == 0 {
-			lookup.Data.extent = id
-		}
-
 		// insert new node
 		node := &internalNode[[]Data, Meta]{id: id, data: data, meta: meta}
 		ok = s.r.InsertIdAfter(after, id, l, node)

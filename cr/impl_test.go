@@ -44,6 +44,12 @@ func TestXxx(t *testing.T) {
 	}
 
 	exclaimSeq, _ := cr.PerformAppend(8, encodeString("!!"), nonce)
+	if cr.PositionFor(exclaimSeq) != 4 {
+		t.Errorf("explain was not at 4, got=%d", cr.PositionFor(exclaimSeq))
+	}
+	if cr.PositionFor(exclaimSeq-1) != 3 {
+		t.Errorf("explain was not at 3, got=%d", cr.PositionFor(exclaimSeq-1))
+	}
 
 	if flattenCr(cr) != "he!!llo there" {
 		t.Errorf("got unexpected: %v", flattenCr(cr))
@@ -52,12 +58,19 @@ func TestXxx(t *testing.T) {
 		t.Errorf("expected four parts")
 	}
 
-	cr.PerformAppend(exclaimSeq, encodeString("??"), nonce)
+	questionSeq, _ := cr.PerformAppend(exclaimSeq, encodeString("??"), nonce)
 	if flattenCr(cr) != "he!!??llo there" {
 		t.Errorf("got unexpected: %v", flattenCr(cr))
 	}
 	if countCr(cr) != 4 {
 		// merged
 		t.Errorf("expected four parts (merged)")
+	}
+
+	if cr.PositionFor(questionSeq) != 6 {
+		t.Errorf("question was not at 6, got=%d", cr.PositionFor(questionSeq))
+	}
+	if cr.PositionFor(questionSeq-1) != 5 {
+		t.Errorf("question-1 was not at 5, got=%d", cr.PositionFor(questionSeq-1))
 	}
 }
