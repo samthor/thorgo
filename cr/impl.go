@@ -9,16 +9,20 @@ import (
 )
 
 func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
+	rope := rope.New[int, *internalNode[[]Data, Meta]]()
+
 	return &serverCrImpl[Data, Meta]{
-		r:      rope.New[int, *internalNode[[]Data, Meta]](),
+		r:      rope,
 		idTree: aatree.New(func(a, b *internalNode[[]Data, Meta]) int { return a.id - b.id }),
 	}
 }
 
 type internalNode[Data any, Meta comparable] struct {
-	id   int // high ID
-	data Data
-	meta Meta
+	id     int // high ID
+	extent int // first ID added as a child of this node
+	data   Data
+	meta   Meta
+
 	// del  int
 }
 
@@ -29,22 +33,32 @@ type serverCrImpl[Data any, Meta comparable] struct {
 	idTree  *aatree.AATree[*internalNode[[]Data, Meta]]
 }
 
-func (s *serverCrImpl[Data, Meta]) ensureEdge(id int) bool {
-	if id == 0 {
-		return true
-	} else if id < 0 {
-		return false
+func (s *serverCrImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data, Meta], at int) {
+	if id <= 0 {
+		return
 	}
 
 	nearest, _ := s.idTree.EqualAfter(&internalNode[[]Data, Meta]{id: id})
 	if nearest == nil {
-		log.Printf("we don't exist: %v", id)
-		return false // no possible entry
+		return // no possible entry
 	}
 
-	at := len(nearest.data) - (nearest.id - id)
+	at = len(nearest.data) - (nearest.id - id)
 	if at < 0 {
-		return false // past the nearest's size, we don't exist
+		return
+	}
+
+	return nearest, at
+}
+
+func (s *serverCrImpl[Data, Meta]) ensureEdge(id int) bool {
+	if id == 0 {
+		return true
+	}
+
+	nearest, at := s.lookupNode(id)
+	if nearest == nil {
+		return false // no possible entry
 	} else if at == len(nearest.data) {
 		return true // we're on an edge already
 	}
@@ -75,6 +89,7 @@ func (s *serverCrImpl[Data, Meta]) ensureEdge(id int) bool {
 	return true
 }
 
+// TODO: currently disused since we modify _directly_ on insert
 func (s *serverCrImpl[Data, Meta]) maybeMergeWithLeft(id int) {
 	lookup := s.r.Info(id)
 	if lookup.Id == 0 {
@@ -89,6 +104,12 @@ func (s *serverCrImpl[Data, Meta]) maybeMergeWithLeft(id int) {
 	if leftLookup.Id != lookup.Id-len(right.data) || leftLookup.Data.meta != right.meta {
 		return
 	}
+
+	if leftLookup.Data.extent != 0 && leftLookup.Data.extent != id {
+		// TODO: left shouldn't have extent (unless it's "us")
+		log.Fatalf("id=%d left=%d had extent=%d", id, leftLookup.Id, leftLookup.Data.extent)
+	}
+
 	right.data = append(leftLookup.Data.data, right.data...)
 
 	// delete both from rope
@@ -105,26 +126,75 @@ func (s *serverCrImpl[Data, Meta]) Len() int {
 	return s.len
 }
 
-func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
-	l := len(data)
-	if l == 0 || !s.ensureEdge(after) {
-		return 0, false
+func (s *serverCrImpl[Data, Meta]) Extent(id int) int {
+	if id == 0 {
+		// you can't delete zero, but let's pretend we can
+		return s.r.LastId()
 	}
 
+	node, _ := s.lookupNode(id)
+	if node == nil {
+		return -1
+	}
+
+	// TODO: this might be O(n). I think we can forever cache this?
+	for node.extent != 0 {
+		node, _ = s.lookupNode(node.extent)
+	}
+	return node.id
+}
+
+func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
+	l := len(data)
+	if l == 0 {
+		return
+	}
+
+	if !s.ensureEdge(after) {
+		return 0, false
+	}
+	lookup := s.r.Info(after)
+	shouldAppend := after != 0 && after == s.highSeq && lookup.Data.meta == meta
+
+	s.len += l
 	s.highSeq += l
 	id := s.highSeq
 
-	node := &internalNode[[]Data, Meta]{id: id, data: data, meta: meta}
-	ok = s.r.InsertIdAfter(after, id, l, node)
-	if !ok {
-		panic("couldn't insertIdAfter even after edge split")
+	if shouldAppend {
+		// we can modify left node directly
+		node := lookup.Data
+		if node.extent != 0 {
+			panic("we're directly after, should not have extent")
+		}
+
+		// remove old
+		s.idTree.Remove(node)
+		s.r.DeleteTo(lookup.Prev, after)
+
+		node.data = append(node.data, data...)
+
+		// append new
+		s.idTree.Insert(node)
+		s.r.InsertIdAfter(lookup.Prev, id, len(node.data), node)
+
+	} else {
+		// store extent on parent node (for deletion tracking)
+		// ...not on root node, can't be deleted
+		if after != 0 && lookup.Data.extent == 0 {
+			lookup.Data.extent = id
+		}
+
+		// insert new node
+		node := &internalNode[[]Data, Meta]{id: id, data: data, meta: meta}
+		ok = s.r.InsertIdAfter(after, id, l, node)
+		if !ok {
+			panic("couldn't insertIdAfter even after edge split")
+		}
+		s.idTree.Insert(node)
+
 	}
-	s.idTree.Insert(node)
-	s.len += len(data)
 
-	s.maybeMergeWithLeft(id)
-
-	return id, ok
+	return id, true
 }
 
 func (s *serverCrImpl[Data, Meta]) Iter() iter.Seq2[int, []Data] {

@@ -43,6 +43,10 @@ type Rope[Id comparable, T any] interface {
 	// e.g., with 0/false, this will aways return the zero Id.
 	ByPosition(position int, biasAfter bool) (id Id, offset int)
 
+	// Between returns the distance between these two nodes.
+	// This costs ~O(logn), and is more expensive than Compare.
+	Between(a, b Id) (distance int, ok bool)
+
 	// Compare the two Id in this Rope.
 	// Costs ~O(logn).
 	Compare(a, b Id) (cmp int, ok bool)
@@ -63,4 +67,7 @@ type Rope[Id comparable, T any] interface {
 	// Pass zero/root for all content after.
 	// Costs ~O(logn+m), where m is the number of nodes being deleted.
 	DeleteTo(afterId, untilId Id) int
+
+	// LastId returns the last Id in this rope.
+	LastId() Id
 }

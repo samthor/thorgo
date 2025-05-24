@@ -232,8 +232,19 @@ func TestIter(t *testing.T) {
 	r := New[int, string]()
 
 	r.InsertIdAfter(0, 1, 5, "hello")
+	if r.LastId() != 1 {
+		t.Errorf("should have first lastId")
+	}
+
 	r.InsertIdAfter(1, 2, 6, " there")
+	if r.LastId() != 2 {
+		t.Errorf("should have second lastId")
+	}
+
 	r.InsertIdAfter(2, 3, 4, " bob")
+	if r.LastId() != 3 {
+		t.Errorf("should have third lastId")
+	}
 
 	// check delete self
 
@@ -247,7 +258,12 @@ func TestIter(t *testing.T) {
 	}
 
 	// delete item we just returned
-	r.DeleteTo(0, 1)
+	if r.DeleteTo(1, 1) != 0 {
+		t.Errorf("should not delete any with same values")
+	}
+	if r.DeleteTo(0, 1) != 1 {
+		t.Errorf("should delete one")
+	}
 
 	id, value, _ = next()
 	if id != 2 || value.Data != " there" {
@@ -270,6 +286,9 @@ func TestIter(t *testing.T) {
 		t.Errorf("should hve single entry")
 	}
 
+	if r.LastId() != 2 {
+		t.Errorf("should have second lastId, was=%v", r.LastId())
+	}
 	r.DeleteTo(0, 2)
 
 	if r.Count() != 0 {
@@ -279,5 +298,9 @@ func TestIter(t *testing.T) {
 	id, value, ok = next()
 	if ok {
 		t.Errorf("should not get more values: last deleted: was=%v %v", id, value)
+	}
+
+	if r.LastId() != 0 {
+		t.Errorf("should have zero lastId, was=%v", r.LastId())
 	}
 }

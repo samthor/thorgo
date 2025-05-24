@@ -53,6 +53,7 @@ type ropeImpl[Id comparable, T any] struct {
 	byId     map[Id]*ropeNode[Id, T]
 	height   int // matches len(head.levels)
 	nodePool []*ropeNode[Id, T]
+	lastId   Id
 }
 
 func (r *ropeImpl[Id, T]) DebugPrint() {
@@ -321,6 +322,10 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 	}
 	r.len += length
 
+	if r.lastId == afterId {
+		r.lastId = newId
+	}
+
 	return true
 }
 
@@ -342,6 +347,20 @@ func (r *ropeImpl[Id, T]) rseekNodes(curr *ropeNode[Id, T], target *[maxHeight]*
 func (r *ropeImpl[Id, T]) Less(a, b Id) bool {
 	c, _ := r.Compare(a, b)
 	return c < 0
+}
+
+func (r *ropeImpl[Id, T]) Between(a, b Id) (distance int, ok bool) {
+	posA := r.Find(a)
+	if posA < 0 {
+		return
+	}
+
+	posB := r.Find(b)
+	if posB < 0 {
+		return
+	}
+
+	return posB - posA, true
 }
 
 func (r *ropeImpl[Id, T]) Compare(a, b Id) (cmp int, ok bool) {
@@ -407,9 +426,15 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) (count int) {
 	var nodes [maxHeight]*ropeNode[Id, T]
 	r.rseekNodes(lookup, &nodes)
 
+	prevLoopId := afterId
+
 	for {
 		e := nodes[0].levels[0].next
 		if e == nil {
+			r.lastId = afterId // we deleted to end, take last known good
+			return
+		}
+		if prevLoopId == untilId {
 			return
 		}
 
@@ -442,11 +467,8 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) (count int) {
 			nl.next = c // when this becomes nil for levels[0], we bail
 		}
 
-		id := e.id
+		prevLoopId = e.id
 		r.returnToPool(e) // clears id
-		if id == untilId {
-			return
-		}
 	}
 }
 
@@ -504,4 +526,8 @@ func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, DataLen[T]] {
 			}
 		}
 	}
+}
+
+func (r *ropeImpl[Id, T]) LastId() Id {
+	return r.lastId
 }
