@@ -40,7 +40,7 @@ type iterRef[Id comparable, T any] struct {
 
 type ropeNode[Id comparable, T any] struct {
 	id     Id
-	dl     DataLength[T]
+	dl     DataLen[T]
 	levels []ropeLevel[Id, T]
 
 	// if set, an iterator is chilling here for the next value
@@ -155,7 +155,7 @@ func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
 		return
 	}
 
-	out.DataLength = node.dl
+	out.DataLen = node.dl
 	out.Id = node.id
 
 	ol := &node.levels[0]
@@ -219,7 +219,7 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 		r.nodePool = r.nodePool[:at]
 
 		newNode.id = newId
-		newNode.dl = DataLength[T]{Data: data, Length: length}
+		newNode.dl = DataLen[T]{Data: data, Len: length}
 		levels = newNode.levels
 		height = len(levels)
 
@@ -228,7 +228,7 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 
 		levels = make([]ropeLevel[Id, T], height)
 		newNode = &ropeNode[Id, T]{
-			dl:     DataLength[T]{Data: data, Length: length},
+			dl:     DataLen[T]{Data: data, Len: length},
 			id:     newId,
 			levels: levels,
 		}
@@ -245,7 +245,7 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 	seek := seekStack[0:r.height]
 	cseek := ropeSeek[Id, T]{
 		node: e,
-		sub:  e.dl.Length,
+		sub:  e.dl.Len,
 	}
 	i := 0
 
@@ -420,7 +420,7 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) (count int) {
 		}
 
 		delete(r.byId, e.id)
-		r.len -= e.dl.Length
+		r.len -= e.dl.Len
 		count++
 
 		for i := range r.height {
@@ -428,13 +428,13 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) (count int) {
 			nl := &node.levels[i]
 			if i >= len(e.levels) {
 				// tail node
-				nl.subtreesize -= e.dl.Length
+				nl.subtreesize -= e.dl.Len
 				continue
 			}
 
 			// mid node 'before us'
 			el := e.levels[i]
-			nl.subtreesize += el.subtreesize - e.dl.Length
+			nl.subtreesize += el.subtreesize - e.dl.Len
 			c := el.next
 			if c != nil {
 				c.levels[i].prev = node
@@ -462,14 +462,14 @@ func (r *ropeImpl[Id, T]) returnToPool(e *ropeNode[Id, T]) {
 
 	// this just clears stuff in case it's a ptr for GC
 	var tmp Id
-	e.dl = DataLength[T]{}
+	e.dl = DataLen[T]{}
 	e.id = tmp
 
 	r.nodePool = append(r.nodePool, e)
 }
 
-func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, DataLength[T]] {
-	return func(yield func(Id, DataLength[T]) bool) {
+func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, DataLen[T]] {
+	return func(yield func(Id, DataLen[T]) bool) {
 		e := r.byId[afterId]
 		if e == nil {
 			return

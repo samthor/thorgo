@@ -9,13 +9,13 @@ import (
 // Info is a holder for info looked up in a Rope.
 type Info[Id comparable, T any] struct {
 	Id, Next, Prev Id
-	DataLength[T]
+	DataLen[T]
 }
 
-// DataLength is a pair type.
-type DataLength[T any] struct {
-	Length int
-	Data   T
+// DataLen is a pair type.
+type DataLen[T any] struct {
+	Len  int
+	Data T
 }
 
 // Rope is a skip list.
@@ -53,7 +53,7 @@ type Rope[Id comparable, T any] interface {
 
 	// Iter reads from after the given Id.
 	// It is safe to use even if the Rope is modified.
-	Iter(afterId Id) iter.Seq2[Id, DataLength[T]]
+	Iter(afterId Id) iter.Seq2[Id, DataLen[T]]
 
 	// Inserts a new entry after the prior Id.
 	// This will panic if the length is negative.

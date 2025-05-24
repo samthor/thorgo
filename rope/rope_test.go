@@ -135,10 +135,10 @@ func TestRope(t *testing.T) {
 			t.Errorf("expected thereAt=5, was=%v", thereAt)
 		}
 		if !reflect.DeepEqual(thereLookup, Info[int, string]{
-			Id:         thereId,
-			Next:       0,
-			Prev:       helloId,
-			DataLength: DataLength[string]{Data: " there", Length: 6},
+			Id:      thereId,
+			Next:    0,
+			Prev:    helloId,
+			DataLen: DataLen[string]{Data: " there", Len: 6},
 		}) {
 			t.Errorf("bad lookup=%+v", thereLookup)
 		}
