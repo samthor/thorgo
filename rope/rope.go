@@ -33,11 +33,18 @@ type ropeLevel[Id comparable, T any] struct {
 	subtreesize int
 }
 
+type iterRef[Id comparable, T any] struct {
+	count int
+	node  *ropeNode[Id, T]
+}
+
 type ropeNode[Id comparable, T any] struct {
 	id     Id
-	len    int
+	dl     DataLength[T]
 	levels []ropeLevel[Id, T]
-	data   T
+
+	// if set, an iterator is chilling here for the next value
+	iterRef *iterRef[Id, T]
 }
 
 type ropeImpl[Id comparable, T any] struct {
@@ -81,7 +88,7 @@ func (r *ropeImpl[Id, T]) DebugPrint() {
 		}
 
 		// add actual data
-		parts = append(parts, r.toString(curr.data))
+		parts = append(parts, r.toString(curr.dl.Data))
 
 		// render
 		log.Printf("- %s", strings.Join(parts, ""))
@@ -148,8 +155,7 @@ func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
 		return
 	}
 
-	out.Data = node.data
-	out.Length = node.len
+	out.DataLength = node.dl
 	out.Id = node.id
 
 	ol := &node.levels[0]
@@ -213,8 +219,7 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 		r.nodePool = r.nodePool[:at]
 
 		newNode.id = newId
-		newNode.data = data
-		newNode.len = length
+		newNode.dl = DataLength[T]{Data: data, Length: length}
 		levels = newNode.levels
 		height = len(levels)
 
@@ -223,9 +228,8 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 
 		levels = make([]ropeLevel[Id, T], height)
 		newNode = &ropeNode[Id, T]{
-			data:   data,
+			dl:     DataLength[T]{Data: data, Length: length},
 			id:     newId,
-			len:    length,
 			levels: levels,
 		}
 	}
@@ -241,7 +245,7 @@ func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) b
 	seek := seekStack[0:r.height]
 	cseek := ropeSeek[Id, T]{
 		node: e,
-		sub:  e.len,
+		sub:  e.dl.Length,
 	}
 	i := 0
 
@@ -394,7 +398,7 @@ func (r *ropeImpl[Id, T]) Compare(a, b Id) (cmp int, ok bool) {
 	}
 }
 
-func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) {
+func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) (count int) {
 	lookup := r.byId[afterId]
 	if lookup == nil {
 		return
@@ -409,21 +413,28 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) {
 			return
 		}
 
+		// if someone is/was iterating here, go _back_ so they'll start up again from after the previous node
+		// this is probably a bit weird but it is an approach
+		if e.iterRef != nil {
+			e.iterRef.node = e.levels[0].prev
+		}
+
 		delete(r.byId, e.id)
-		r.len -= e.len
+		r.len -= e.dl.Length
+		count++
 
 		for i := range r.height {
 			node := nodes[i]
 			nl := &node.levels[i]
 			if i >= len(e.levels) {
 				// tail node
-				nl.subtreesize -= e.len
+				nl.subtreesize -= e.dl.Length
 				continue
 			}
 
 			// mid node 'before us'
 			el := e.levels[i]
-			nl.subtreesize += el.subtreesize - e.len
+			nl.subtreesize += el.subtreesize - e.dl.Length
 			c := el.next
 			if c != nil {
 				c.levels[i].prev = node
@@ -431,15 +442,16 @@ func (r *ropeImpl[Id, T]) DeleteTo(afterId, untilId Id) {
 			nl.next = c // when this becomes nil for levels[0], we bail
 		}
 
-		r.returnToPool(e)
-		if e.id == untilId {
+		id := e.id
+		r.returnToPool(e) // clears id
+		if id == untilId {
 			return
 		}
 	}
 }
 
 func (r *ropeImpl[Id, T]) returnToPool(e *ropeNode[Id, T]) {
-	if len(r.nodePool) == poolSize {
+	if len(r.nodePool) == poolSize || e.iterRef != nil {
 		return
 	}
 
@@ -447,15 +459,17 @@ func (r *ropeImpl[Id, T]) returnToPool(e *ropeNode[Id, T]) {
 	for i := range e.levels {
 		e.levels[i] = zero
 	}
-	e.data = *new(T)
+
+	// this just clears stuff in case it's a ptr for GC
+	var tmp Id
+	e.dl = DataLength[T]{}
+	e.id = tmp
 
 	r.nodePool = append(r.nodePool, e)
 }
 
-func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, T] {
-	// FIXME: will freak out if deletion during here
-
-	return func(yield func(Id, T) bool) {
+func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, DataLength[T]] {
+	return func(yield func(Id, DataLength[T]) bool) {
 		e := r.byId[afterId]
 		if e == nil {
 			return
@@ -467,10 +481,27 @@ func (r *ropeImpl[Id, T]) Iter(afterId Id) iter.Seq2[Id, T] {
 				return
 			}
 
-			if !yield(next.id, next.data) {
+			e = next
+
+			if e.iterRef == nil {
+				e.iterRef = &iterRef[Id, T]{node: e, count: 1}
+			} else {
+				e.iterRef.count++
+			}
+
+			shouldContinue := yield(e.id, e.dl)
+
+			// this will probably be ourselves unless we were deleted
+			update := e.iterRef.node
+			e.iterRef.count--
+			if e.iterRef.count == 0 {
+				e.iterRef = nil
+			}
+			e = update
+
+			if !shouldContinue {
 				return
 			}
-			e = next
 		}
 	}
 }

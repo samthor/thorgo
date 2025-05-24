@@ -6,25 +6,23 @@ import (
 	"iter"
 )
 
-var (
-	// RootId is the zero ID for all ropes.
-	RootId = Id(0)
-)
-
-// Id is the opaque ID given when you add to a Rope.
-type Id int
-
 // Info is a holder for info looked up in a Rope.
-type Info[T any] struct {
+type Info[Id comparable, T any] struct {
 	Id, Next, Prev Id
-	Length         int
-	Data           T
+	DataLength[T]
+}
+
+// DataLength is a pair type.
+type DataLength[T any] struct {
+	Length int
+	Data   T
 }
 
 // Rope is a skip list.
 // It supports zero-length entries.
 // It is not goroutine-safe.
-type Rope[T any] interface {
+// The zero Id is always part of the Rope and has zero length, don't use it to add items.
+type Rope[Id comparable, T any] interface {
 	// Returns the total sum of the parts of the rope. O(1).
 	Len() int
 
@@ -37,32 +35,32 @@ type Rope[T any] interface {
 
 	// Finds info on the given Id.
 	// This lookup costs O(1).
-	Info(id Id) Info[T]
+	Info(id Id) Info[Id, T]
 
 	// Finds the Id/info at the position in the Rope.
 	// This costs ~O(logn).
 	// Either stops before or skips after zero-length content based on biasAfter.
-	// e.g., with 0/false, this will aways return Id=0 (the root).
+	// e.g., with 0/false, this will aways return the zero Id.
 	ByPosition(position int, biasAfter bool) (id Id, offset int)
 
 	// Compare the two Id in this Rope.
 	// Costs ~O(logn).
 	Compare(a, b Id) (cmp int, ok bool)
 
-	// Is the first Id in this Rope before the other. For sorting.
+	// Less determines if the first Id in this Rope before the other. For sorting.
 	// Costs ~O(logn).
-	Before(a, b Id) bool
+	Less(a, b Id) bool
 
-	// Iter reads IDs from after the given Id.
-	Iter(afterId Id) iter.Seq2[Id, T]
+	// Iter reads from after the given Id.
+	// It is safe to use even if the Rope is modified.
+	Iter(afterId Id) iter.Seq2[Id, DataLength[T]]
 
-	// Insert data after the prior Id.
-	// Length must be zero or positive.
-	// Costs ~O(logn).
-	InsertAfter(id Id, length int, data T) Id
+	// Inserts a new entry after the prior Id.
+	// This will panic if the length is negative.
+	InsertIdAfter(afterId, id Id, length int, data T) bool
 
-	// DeleteTo deletes after the given ID until the target Id.
+	// DeleteTo deletes after the given Id until the target Id.
 	// Pass zero/root for all content after.
 	// Costs ~O(logn+m), where m is the number of nodes being deleted.
-	DeleteTo(afterId, untilId Id)
+	DeleteTo(afterId, untilId Id) int
 }
