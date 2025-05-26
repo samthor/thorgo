@@ -43,6 +43,13 @@ func (t *AATree[X]) Count() int {
 
 // Has checks if this tree contains the given data, based on the compare function.
 func (t *AATree[X]) Has(data X) bool {
+	_, ok := t.Get(data)
+	return ok
+}
+
+// Get checks if this tree contains the given data, based on the compare function.
+// Returns the previously added data for this node.
+func (t *AATree[X]) Get(data X) (out X, ok bool) {
 	node := t.root
 
 	for node != nil {
@@ -52,10 +59,10 @@ func (t *AATree[X]) Has(data X) bool {
 		} else if c > 0 {
 			node = node.right
 		} else {
-			return true
+			return node.data, true
 		}
 	}
-	return false
+	return
 }
 
 // EqualBefore finds the node with the given data or the node closest before the passed argument.
@@ -136,8 +143,8 @@ func (t *AATree[X]) equalBefore(node *treeNode[X], data X) (x X, out bool) {
 		}
 
 		if c != 0 {
-			// recursive on left so we can compare value
-			within, ok := t.equalBefore(node.left, data)
+			// recursive on right so we have a fallback
+			within, ok := t.equalBefore(node.right, data)
 			if ok {
 				return within, true
 			}
@@ -173,7 +180,7 @@ func (t *AATree[X]) equalAfter(node *treeNode[X], data X) (x X, out bool) {
 		}
 
 		if c != 0 {
-			// recursive on left so we can compare value
+			// recursive on left so we have a fallback
 			within, ok := t.equalAfter(node.left, data)
 			if ok {
 				return within, true
@@ -193,8 +200,8 @@ func (t *AATree[X]) after(node *treeNode[X], data X) (x X, ok bool) {
 			ok = true
 			node = node.left // try to find a smaller candidate (closer to data)
 		} else {
-			// current node.data is <= data, so it's not before data
-			// move to the right to find smaller values
+			// current node.data is <= data, so it's not after data
+			// move to the right to find larger values
 			node = node.right
 		}
 	}
