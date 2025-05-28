@@ -24,16 +24,18 @@ func prepareSample() (rr rope.Rope[string, string], r CrRange[string]) {
 func TestRange(t *testing.T) {
 	rr, r := prepareSample()
 
-	if !r.Mark("b", "d") {
-		t.Errorf("can't mark sane start")
+	if newlyIncluded, delta, ok := r.Mark("d", "b"); !ok ||
+		delta != 6 ||
+		!reflect.DeepEqual(newlyIncluded, []string{"b", "d"}) {
+		t.Errorf("can't mark sane start: delta=%v newlyIncluded=%+v", delta, newlyIncluded)
 	}
 	r.Mark("b", "a") // will be swapped
 
 	if r.ExtentCount() != 1 {
 		t.Errorf("expected single extent, was: %v", r.ExtentCount())
 	}
-	if r.Delta() != -11 {
-		t.Errorf("expected -11 delta, was: %v", r.Delta())
+	if r.Delta() != 11 {
+		t.Errorf("expected 11 delta, was: %v", r.Delta())
 	}
 
 	r.Mark("e", "f")
@@ -46,7 +48,10 @@ func TestRange(t *testing.T) {
 		t.Errorf("unexpected state: %+v", impl.debugState())
 	}
 
-	r.Mark("b", "e")
+	if newlyIncluded, delta, _ := r.Mark("b", "e"); delta != 12 ||
+		!reflect.DeepEqual(newlyIncluded, []string{"d", "e"}) {
+		t.Errorf("can't merge: delta=%v newlyIncluded=%+v", delta, newlyIncluded)
+	}
 	if !reflect.DeepEqual(impl.debugState(), []string{"a", "f"}) {
 		t.Errorf("unexpected state: %+v", impl.debugState())
 	}
@@ -87,7 +92,30 @@ func TestRange(t *testing.T) {
 	if !r.Grow("d", 100) {
 		t.Errorf("should have grown by 1009")
 	}
-	if r.Delta() != -129 {
-		t.Errorf("got invalid -ve delta")
+	if r.Delta() != 129 {
+		t.Errorf("got invalid delta, wanted 129 got %v", r.Delta())
+	}
+}
+
+func TestMultiMerge(t *testing.T) {
+	rr, r := prepareSample()
+
+	r.Mark("a", "b")
+	r.Mark("c", "d")
+	r.Mark("e", "f")
+
+	beforeDelta := r.Delta()
+
+	if newlyIncluded, delta, _ := r.Mark("", "f"); delta != 21 ||
+		!reflect.DeepEqual(newlyIncluded, []string{"", "a", "b", "c", "d", "e"}) {
+		t.Errorf("can't merge: delta=%v newlyIncluded=%+v", delta, newlyIncluded)
+	}
+
+	if beforeDelta+21 != rr.Len() {
+		t.Errorf("invalid delta for total delete addition")
+	}
+
+	if r.Delta() != rr.Len() {
+		t.Errorf("invalid delta for total delete")
 	}
 }

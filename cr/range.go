@@ -62,12 +62,12 @@ type rangeNode[Id any] struct {
 type CrRange[Id any] interface {
 	// Mark marks the given range.
 	// Returns false if the range is zero or invalid.
-	Mark(a, b Id) bool
+	Mark(a, b Id) (newlyIncluded []Id, delta int, ok bool)
 
 	// ExtentCount returns the number of unique extent ranges here.
 	ExtentCount() int
 
-	// Delta returns the zero or negative delta that this range would impact if used as deletion.
+	// Delta returns the zero or positive delta that this range would impact if used as deletion.
 	Delta() int
 
 	// Grow indicates that the underlying Rope has changed by this much at this node, which must be positive.
@@ -114,11 +114,11 @@ func (ro *rangeOver[Id]) extentFor(at Id) *extentState[Id] {
 	return before.state
 }
 
-func (ro *rangeOver[Id]) Mark(a, b Id) bool {
+func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 	c, _ := ro.config.Compare(a, b)
 	if c == 0 {
 		// either same, _or_ zero value (because ok is false)
-		return false
+		return nil, 0, false
 	} else if c > 0 {
 		// swap to correct order
 		a, b = b, a
@@ -128,11 +128,11 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 	rightExtent := ro.extentFor(b)
 
 	// we're within the same extent: short-circuit and just mod internally
-	// no change to outer length
+	// no change to outer length or included
 	if leftExtent != nil && leftExtent == rightExtent {
 		leftExtent.mod(a, +1)
 		leftExtent.mod(b, -1)
-		return true
+		return nil, 0, true
 	}
 
 	// otherwise, delete all extents within this range and re-add single combined extent
@@ -156,7 +156,7 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 		} else if cmp, _ := ro.config.Compare(search.id, b); cmp >= 0 {
 			break
 		}
-		if search.start {
+		if search.start && search.state != rightExtent {
 			toMerge = append(toMerge, search.state)
 		}
 	}
@@ -165,6 +165,30 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 	if rightExtent != nil {
 		high = rightExtent.end.id
 		toMerge = append(toMerge, rightExtent)
+	}
+
+	// wire up newlyIncluded (the gaps filled in)
+	var newlyIncluded []Id
+	if len(toMerge) == 0 {
+		newlyIncluded = []Id{a, b}
+	} else {
+		newlyIncluded = make([]Id, 0, (len(toMerge)+1)*2)
+
+		if leftExtent == nil {
+			first := toMerge[0]
+			newlyIncluded = append(newlyIncluded, a, first.start.id)
+		}
+
+		for i := 1; i < len(toMerge); i++ {
+			begin := toMerge[i-1].end.id
+			end := toMerge[i].start.id
+			newlyIncluded = append(newlyIncluded, begin, end)
+		}
+
+		if rightExtent == nil {
+			last := toMerge[len(toMerge)-1]
+			newlyIncluded = append(newlyIncluded, last.end.id, b)
+		}
 	}
 
 	// TODO: if toMerge is size=1, we could resize instead (but cbf'ed)
@@ -187,7 +211,7 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 		ro.extentTree.Remove(e.end)
 
 		delta, _ := ro.config.Between(e.start.id, e.end.id)
-		lengthDelta += delta // "restore" this range
+		lengthDelta -= delta // "restore" this range
 	}
 
 	// actually mod ourselves
@@ -195,7 +219,7 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 	extent.mod(b, -1)
 
 	delta, _ := ro.config.Between(low, high)
-	lengthDelta -= delta // "add" this range
+	lengthDelta += delta // "add" this range
 
 	// insert the new extent
 	ok1 := ro.extentTree.Insert(extent.start)
@@ -205,7 +229,7 @@ func (ro *rangeOver[Id]) Mark(a, b Id) bool {
 	}
 
 	ro.delta += lengthDelta
-	return true
+	return newlyIncluded, lengthDelta, true
 }
 
 func (ro *rangeOver[Id]) ExtentCount() int {
@@ -256,6 +280,6 @@ func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
 		return false // nothing to do, after extent
 	}
 
-	ro.delta -= by
+	ro.delta += by
 	return true
 }
