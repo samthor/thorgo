@@ -1,4 +1,4 @@
-package internal
+package cr
 
 import (
 	"testing"
@@ -9,7 +9,7 @@ func encodeString(s string) []uint16 {
 	return utf16.Encode([]rune(s))
 }
 
-func flattenCr(cr CrAdd[uint16, struct{}]) string {
+func flattenCr(cr *crAddImpl[uint16, struct{}]) string {
 	out := make([]uint16, 0, cr.Len())
 
 	for _, data := range cr.Iter() {
@@ -19,7 +19,7 @@ func flattenCr(cr CrAdd[uint16, struct{}]) string {
 	return string(utf16.Decode(out))
 }
 
-func countCr[X comparable](cr CrAdd[uint16, X]) (count int) {
+func countCr[X comparable](cr *crAddImpl[uint16, X]) (count int) {
 	for range cr.Iter() {
 		count++
 	}
@@ -27,7 +27,7 @@ func countCr[X comparable](cr CrAdd[uint16, X]) (count int) {
 }
 
 func TestCrAdd(t *testing.T) {
-	cr := NewCrAdd[uint16, struct{}]()
+	cr := newCrAdd[uint16, struct{}]()
 	nonce := struct{}{}
 
 	cr.PerformAppend(0, encodeString(" there"), nonce)

@@ -1,4 +1,4 @@
-package internal
+package cr
 
 import (
 	"reflect"
@@ -7,9 +7,9 @@ import (
 	"github.com/samthor/thorgo/rope"
 )
 
-func prepareSample() (rr rope.Rope[string, string], r CrRange[string]) {
+func prepareSample() (rr rope.Rope[string, string], r *rangeOver[string]) {
 	rr = rope.New[string, string]()
-	r = NewRange(rr)
+	r = newRange(rr)
 
 	rr.InsertIdAfter("", "a", 5, "hello")
 	rr.InsertIdAfter("a", "b", 5, "there")
@@ -43,20 +43,19 @@ func TestRange(t *testing.T) {
 		t.Errorf("expected double extent, was: %v", r.ExtentCount())
 	}
 
-	impl := r.(*rangeOver[string])
-	if !reflect.DeepEqual(impl.debugState(), []string{"a", "d", "e", "f"}) {
-		t.Errorf("unexpected state: %+v", impl.debugState())
+	if !reflect.DeepEqual(r.debugState(), []string{"a", "d", "e", "f"}) {
+		t.Errorf("unexpected state: %+v", r.debugState())
 	}
 
 	if newlyIncluded, delta, _ := r.Mark("b", "e"); delta != 12 ||
 		!reflect.DeepEqual(newlyIncluded, []string{"d", "e"}) {
 		t.Errorf("can't merge: delta=%v newlyIncluded=%+v", delta, newlyIncluded)
 	}
-	if !reflect.DeepEqual(impl.debugState(), []string{"a", "f"}) {
-		t.Errorf("unexpected state: %+v", impl.debugState())
+	if !reflect.DeepEqual(r.debugState(), []string{"a", "f"}) {
+		t.Errorf("unexpected state: %+v", r.debugState())
 	}
 
-	if actual := impl.debugWithin("b"); !reflect.DeepEqual(actual, []rangeNode[string]{
+	if actual := r.debugWithin("b"); !reflect.DeepEqual(actual, []rangeNode[string]{
 		{id: "a", delta: +1},
 		{id: "b", delta: +1},
 		{id: "d", delta: -1},
@@ -66,7 +65,7 @@ func TestRange(t *testing.T) {
 	}
 
 	r.Mark("b", "e")
-	if actual := impl.debugWithin("a"); !reflect.DeepEqual(actual, []rangeNode[string]{
+	if actual := r.debugWithin("a"); !reflect.DeepEqual(actual, []rangeNode[string]{
 		{id: "a", delta: +1},
 		{id: "b", delta: +2},
 		{id: "d", delta: -1},
@@ -77,7 +76,7 @@ func TestRange(t *testing.T) {
 	}
 
 	r.Mark("c", "d")
-	if actual := impl.debugWithin("f"); !reflect.DeepEqual(actual, []rangeNode[string]{
+	if actual := r.debugWithin("f"); !reflect.DeepEqual(actual, []rangeNode[string]{
 		{id: "a", delta: +1},
 		{id: "b", delta: +2},
 		{id: "c", delta: +1},

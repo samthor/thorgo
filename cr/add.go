@@ -1,4 +1,4 @@
-package internal
+package cr
 
 import (
 	"iter"
@@ -7,20 +7,7 @@ import (
 	"github.com/samthor/thorgo/rope"
 )
 
-type CrAdd[Data any, Meta comparable] interface {
-	Len() int
-	Iter() iter.Seq2[int, []Data]
-
-	// PositionFor returns the position for the given ID.
-	PositionFor(id int) int
-
-	// PerformAppend inserts data into this CrAdd after the prior node.
-	// Returns true if the data was inserted.
-	// As a convenience, returns the new ID of the data.
-	PerformAppend(after int, data []Data, meta Meta) (now int, ok bool)
-}
-
-func NewCrAdd[Data any, Meta comparable]() CrAdd[Data, Meta] {
+func newCrAdd[Data any, Meta comparable]() *crAddImpl[Data, Meta] {
 	rope := rope.New[int, *internalNode[[]Data, Meta]]()
 
 	return &crAddImpl[Data, Meta]{

@@ -1,4 +1,4 @@
-package internal
+package cr
 
 import (
 	"github.com/samthor/thorgo/aatree"
@@ -60,29 +60,7 @@ type rangeNode[Id comparable] struct {
 	delta int
 }
 
-type CrRange[Id comparable] interface {
-	// Mark marks the given range.
-	// Returns false if the range is zero or invalid.
-	Mark(a, b Id) (newlyIncluded []Id, delta int, ok bool)
-
-	// Release is the opposite of Mark, releasing the given range.
-	Release(a, b Id) (newlyVisible []Id, delta int, ok bool)
-
-	// ExtentCount returns the number of unique extent ranges here.
-	ExtentCount() int
-
-	// Delta returns the zero or positive delta that this range would impact if used as deletion.
-	Delta() int
-
-	// DeltaFor ...
-	DeltaFor(id Id) int
-
-	// Grow indicates that the underlying Rope has changed by this much at this node, which must be positive.
-	// If this returns true, it is within a known current range and has been included.
-	Grow(after Id, by int) bool
-}
-
-func NewRange[Id comparable](config rangeOverConfig[Id]) CrRange[Id] {
+func newRange[Id comparable](config rangeOverConfig[Id]) *rangeOver[Id] {
 	extentCompare := func(a, b *extentNode[Id]) int {
 		c, _ := config.Compare(a.id, b.id)
 		return c
