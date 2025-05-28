@@ -1,4 +1,4 @@
-package cr
+package internal
 
 import (
 	"github.com/samthor/thorgo/aatree"
