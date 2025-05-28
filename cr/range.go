@@ -1,7 +1,10 @@
 package cr
 
 import (
+	"log"
+
 	"github.com/samthor/thorgo/aatree"
+	"github.com/samthor/thorgo/rope"
 )
 
 // rangeOverConfig is the subset of rope.Rope needed to maintain range information.
@@ -51,7 +54,7 @@ type rangeOver[Id comparable] struct {
 	config       rangeOverConfig[Id]
 	extentTree   *aatree.AATree[*extentNode[Id]]
 	rangeCompare func(a, b *rangeNode[Id]) int
-	delta        int // maintained delta over underlying rope
+	extentRope   rope.Rope[Id, *extentState[Id]]
 }
 
 type rangeNode[Id comparable] struct {
@@ -73,6 +76,9 @@ type CrRange[Id comparable] interface {
 	// Delta returns the zero or positive delta that this range would impact if used as deletion.
 	Delta() int
 
+	// DeltaFor ...
+	DeltaFor(id Id) int
+
 	// Grow indicates that the underlying Rope has changed by this much at this node, which must be positive.
 	// If this returns true, it is within a known current range and has been included.
 	Grow(after Id, by int) bool
@@ -92,6 +98,7 @@ func NewRange[Id comparable](config rangeOverConfig[Id]) CrRange[Id] {
 		config:       config,
 		extentTree:   aatree.New(extentCompare),
 		rangeCompare: rangeCompare,
+		extentRope:   rope.New[Id, *extentState[Id]](),
 	}
 }
 
@@ -176,9 +183,10 @@ func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 		newlyIncluded = []Id{a, b}
 	} else {
 		newlyIncluded = make([]Id, 0, (len(toMerge)+1)*2)
+		first := toMerge[0]
+		last := toMerge[len(toMerge)-1]
 
 		if leftExtent == nil {
-			first := toMerge[0]
 			newlyIncluded = append(newlyIncluded, a, first.start.id)
 		}
 
@@ -189,8 +197,15 @@ func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 		}
 
 		if rightExtent == nil {
-			last := toMerge[len(toMerge)-1]
 			newlyIncluded = append(newlyIncluded, last.end.id, b)
+		}
+
+		// piggyback to delete from rope
+		prev := ro.extentRope.Info(first.start.id).Prev
+		deleted := ro.extentRope.DeleteTo(prev, last.start.id)
+		if deleted != len(toMerge) {
+			log.Fatalf("deleted=%d len=%d rope=%+v prev=%v id=%v", deleted, len(toMerge), ro.extentRope.Count(), prev, last.start.id)
+			panic("rope couldn't delete expected entries")
 		}
 	}
 
@@ -231,7 +246,18 @@ func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 		panic("should not already exist")
 	}
 
-	ro.delta += lengthDelta
+	// insert rope entry after prior extent (or root)
+	lastExtent, _ := ro.extentTree.Before(extent.start)
+	var insertRopeAfter Id
+	if lastExtent != nil {
+		insertRopeAfter = lastExtent.state.start.id
+	}
+	log.Printf("deleting low/high %v/%v delta=%d modDelta=%d", low, high, delta, lengthDelta)
+	if !ro.extentRope.InsertIdAfter(insertRopeAfter, extent.start.id, delta, extent) {
+		log.Fatalf("deleting insert after=%v start=%v", insertRopeAfter, extent.start.id)
+		panic("can't delete marked range")
+	}
+
 	return newlyIncluded, lengthDelta, true
 }
 
@@ -268,7 +294,7 @@ func (ro *rangeOver[Id]) debugWithin(id Id) []rangeNode[Id] {
 }
 
 func (ro *rangeOver[Id]) Delta() int {
-	return ro.delta
+	return ro.extentRope.Len()
 }
 
 func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
@@ -283,7 +309,11 @@ func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
 		return false // nothing to do, at very end of extent (will be added)
 	}
 
-	ro.delta += by
+	// delete/add to rope with updated length
+	info := ro.extentRope.Info(e.start.id)
+	ro.extentRope.DeleteTo(info.Prev, info.Id)
+	ro.extentRope.InsertIdAfter(info.Prev, info.Id, info.Len+by, e)
+
 	return true
 }
 
@@ -302,6 +332,11 @@ func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, 
 		// invalid: cannot release what was not cleanly marked
 		return
 	}
+
+	// remove from rope
+	info := ro.extentRope.Info(sourceExtent.start.id)
+	ro.extentRope.DeleteTo(info.Prev, info.Id)
+	insertAfter := info.Prev
 
 	// we can create 0-n new extents here
 	// TODO: for now we lazily reinsert everything (gross)
@@ -347,17 +382,22 @@ func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, 
 		active.mod(node.id, node.delta)
 		count += node.delta
 
-		if count == 0 {
-			active.end.id = node.id
-			ro.extentTree.Insert(active.start)
-			ro.extentTree.Insert(active.end)
-
-			delta, _ := ro.config.Between(active.start.id, active.end.id)
-			lengthDelta += delta
-
-			active = nil
-			lastId = node.id
+		if count > 0 {
+			continue // not finished yet
 		}
+
+		active.end.id = node.id
+		ro.extentTree.Insert(active.start)
+		ro.extentTree.Insert(active.end)
+
+		delta, _ := ro.config.Between(active.start.id, active.end.id)
+		lengthDelta += delta
+
+		ro.extentRope.InsertIdAfter(insertAfter, active.start.id, delta, active)
+		insertAfter = active.start.id
+
+		active = nil
+		lastId = node.id
 	}
 
 	if lastId != sourceExtent.end.id {
@@ -370,6 +410,25 @@ func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, 
 		panic("lengthDelta must be -ve or 0")
 	}
 
-	ro.delta += lengthDelta
 	return newlyReleased, lengthDelta, true
+}
+
+func (ro *rangeOver[Id]) DeltaFor(id Id) int {
+	var innerDelta int
+
+	left, _ := ro.extentTree.Before(&extentNode[Id]{id: id})
+
+	if left != nil && left.start {
+		// include the within part of this entry
+		innerDelta, _ = ro.config.Between(left.state.start.id, id)
+		left, _ = ro.extentTree.Before(left)
+	}
+
+	if left == nil {
+		return innerDelta
+	}
+
+	var zeroId Id
+	delta, _ := ro.extentRope.Between(zeroId, left.state.start.id)
+	return delta + innerDelta
 }

@@ -116,7 +116,7 @@ func TestMultiMerge(t *testing.T) {
 	}
 
 	if r.Delta() != rr.Len() {
-		t.Errorf("invalid delta for total delete")
+		t.Errorf("invalid delta for total delete: delta=%v len=%v (bd=%v)", r.Delta(), rr.Len(), beforeDelta)
 	}
 }
 
@@ -153,4 +153,18 @@ func TestRelease(t *testing.T) {
 	if _, _, ok := r.Release("c", "e"); ok {
 		t.Errorf("should not release")
 	}
+}
+
+func TestDeltaFor(t *testing.T) {
+	_, r := prepareSample()
+
+	if r.DeltaFor("e") != 0 {
+		t.Errorf("should be zero delta to start")
+	}
+
+	r.Mark("d", "f")
+	if r.DeltaFor("e") != 4 {
+		t.Errorf("should be...")
+	}
+
 }

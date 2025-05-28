@@ -20,8 +20,6 @@ type internalNode[Data any, Meta comparable] struct {
 	id   int // high ID
 	data Data
 	meta Meta
-
-	// del  int
 }
 
 type serverCrImpl[Data any, Meta comparable] struct {
