@@ -1,5 +1,9 @@
 package aatree
 
+import (
+	"iter"
+)
+
 type treeNode[X any] struct {
 	level int
 	left  *treeNode[X]
@@ -28,6 +32,28 @@ func New[X any](compare CompareFunc[X]) *AATree[X] {
 	return &AATree[X]{
 		compare: compare,
 	}
+}
+
+// Iter iterates over all data here.
+func (t *AATree[X]) Iter() iter.Seq[X] {
+	return func(yield func(X) bool) {
+		curr, ok := t.Low()
+		for ok {
+			if !yield(curr) {
+				return
+			}
+			curr, ok = t.After(curr)
+		}
+	}
+}
+
+// Low returns the low node from this tree.
+func (t *AATree[X]) Low() (out X, ok bool) {
+	if t.root == nil {
+		return
+	}
+	node := findMinNode(t.root)
+	return node.data, true
 }
 
 // Clear removes all elements from the tree.

@@ -1,28 +1,93 @@
 package cr
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/samthor/thorgo/rope"
 )
 
-func TestRange(t *testing.T) {
-
-	rr := rope.New[string, string]()
-
-	r := NewRange(rr)
-	if r.Mark("abc", "def") {
-		t.Errorf("cannot insert unknown IDs")
-	}
+func prepareSample() (rr rope.Rope[string, string], r CrRange[string]) {
+	rr = rope.New[string, string]()
+	r = NewRange(rr)
 
 	rr.InsertIdAfter("", "a", 5, "hello")
 	rr.InsertIdAfter("a", "b", 5, "there")
 	rr.InsertIdAfter("b", "c", 4, ", jim")
 	rr.InsertIdAfter("c", "d", 2, "!!")
 	rr.InsertIdAfter("d", "e", 12, ", what's up")
+	rr.InsertIdAfter("e", "f", 6, " noobs")
+
+	return
+}
+
+func TestRange(t *testing.T) {
+	rr, r := prepareSample()
 
 	if !r.Mark("b", "d") {
 		t.Errorf("can't mark sane start")
 	}
-	r.Mark("a", "b") // will be swapped
+	r.Mark("b", "a") // will be swapped
+
+	if r.ExtentCount() != 1 {
+		t.Errorf("expected single extent, was: %v", r.ExtentCount())
+	}
+	if r.Delta() != -11 {
+		t.Errorf("expected -11 delta, was: %v", r.Delta())
+	}
+
+	r.Mark("e", "f")
+	if r.ExtentCount() != 2 {
+		t.Errorf("expected double extent, was: %v", r.ExtentCount())
+	}
+
+	impl := r.(*rangeOver[string])
+	if !reflect.DeepEqual(impl.debugState(), []string{"a", "d", "e", "f"}) {
+		t.Errorf("unexpected state: %+v", impl.debugState())
+	}
+
+	r.Mark("b", "e")
+	if !reflect.DeepEqual(impl.debugState(), []string{"a", "f"}) {
+		t.Errorf("unexpected state: %+v", impl.debugState())
+	}
+
+	if actual := impl.debugWithin("b"); !reflect.DeepEqual(actual, []rangeNode[string]{
+		{id: "a", delta: +1},
+		{id: "b", delta: +1},
+		{id: "d", delta: -1},
+		{id: "f", delta: -1},
+	}) {
+		t.Errorf("unexpected within: %+v", actual)
+	}
+
+	r.Mark("b", "e")
+	if actual := impl.debugWithin("a"); !reflect.DeepEqual(actual, []rangeNode[string]{
+		{id: "a", delta: +1},
+		{id: "b", delta: +2},
+		{id: "d", delta: -1},
+		{id: "e", delta: -1},
+		{id: "f", delta: -1},
+	}) {
+		t.Errorf("unexpected within: %+v", actual)
+	}
+
+	r.Mark("c", "d")
+	if actual := impl.debugWithin("f"); !reflect.DeepEqual(actual, []rangeNode[string]{
+		{id: "a", delta: +1},
+		{id: "b", delta: +2},
+		{id: "c", delta: +1},
+		{id: "d", delta: -2},
+		{id: "e", delta: -1},
+		{id: "f", delta: -1},
+	}) {
+		t.Errorf("unexpected within: %+v", actual)
+	}
+
+	rr.InsertIdAfter("d", "d1", 100, "")
+	if !r.Grow("d", 100) {
+		t.Errorf("should have grown by 1009")
+	}
+	if r.Delta() != -129 {
+		t.Errorf("got invalid -ve delta")
+	}
 }

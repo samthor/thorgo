@@ -349,18 +349,21 @@ func (r *ropeImpl[Id, T]) Less(a, b Id) bool {
 	return c < 0
 }
 
-func (r *ropeImpl[Id, T]) Between(a, b Id) (distance int, ok bool) {
-	posA := r.Find(a)
+func (r *ropeImpl[Id, T]) Between(afterA, afterB Id) (distance int, ok bool) {
+	posA := r.Find(afterA)
 	if posA < 0 {
 		return
 	}
 
-	posB := r.Find(b)
+	posB := r.Find(afterB)
 	if posB < 0 {
 		return
 	}
 
-	return posB - posA, true
+	anode := r.byId[afterA]
+	bnode := r.byId[afterB]
+
+	return (posB + bnode.dl.Len) - (posA + anode.dl.Len), true
 }
 
 func (r *ropeImpl[Id, T]) Compare(a, b Id) (cmp int, ok bool) {

@@ -43,11 +43,11 @@ type Rope[Id comparable, T any] interface {
 	// e.g., with 0/false, this will aways return the zero Id.
 	ByPosition(position int, biasAfter bool) (id Id, offset int)
 
-	// Between returns the distance between these two nodes.
+	// Between returns the distance between _after_ these two nodes.
 	// This costs ~O(logn), and is more expensive than Compare.
-	Between(a, b Id) (distance int, ok bool)
+	Between(afterA, afterB Id) (distance int, ok bool)
 
-	// Compare the two Id in this Rope.
+	// Compare the position of the two Id in this Rope.
 	// Costs ~O(logn).
 	Compare(a, b Id) (cmp int, ok bool)
 
