@@ -7,10 +7,23 @@ import (
 	"github.com/samthor/thorgo/rope"
 )
 
-func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
+type CrAdd[Data any, Meta comparable] interface {
+	Len() int
+	Iter() iter.Seq2[int, []Data]
+
+	// PositionFor returns the position for the given ID.
+	PositionFor(id int) int
+
+	// PerformAppend inserts data into this CrAdd after the prior node.
+	// Returns true if the data was inserted.
+	// As a convenience, returns the new ID of the data.
+	PerformAppend(after int, data []Data, meta Meta) (now int, ok bool)
+}
+
+func NewCrAdd[Data any, Meta comparable]() CrAdd[Data, Meta] {
 	rope := rope.New[int, *internalNode[[]Data, Meta]]()
 
-	return &serverCrImpl[Data, Meta]{
+	return &crAddImpl[Data, Meta]{
 		r:      rope,
 		idTree: aatree.New(func(a, b *internalNode[[]Data, Meta]) int { return a.id - b.id }),
 	}
@@ -22,14 +35,14 @@ type internalNode[Data any, Meta comparable] struct {
 	meta Meta
 }
 
-type serverCrImpl[Data any, Meta comparable] struct {
+type crAddImpl[Data any, Meta comparable] struct {
 	len     int
 	highSeq int
 	r       rope.Rope[int, *internalNode[[]Data, Meta]]
 	idTree  *aatree.AATree[*internalNode[[]Data, Meta]]
 }
 
-func (s *serverCrImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data, Meta], at int) {
+func (s *crAddImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data, Meta], at int) {
 	if id <= 0 {
 		return
 	}
@@ -47,7 +60,7 @@ func (s *serverCrImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data
 	return nearest, at
 }
 
-func (s *serverCrImpl[Data, Meta]) ensureEdge(id int) bool {
+func (s *crAddImpl[Data, Meta]) ensureEdge(id int) bool {
 	if id == 0 {
 		return true
 	}
@@ -86,7 +99,7 @@ func (s *serverCrImpl[Data, Meta]) ensureEdge(id int) bool {
 }
 
 // TODO: currently disused since we modify _directly_ on insert
-func (s *serverCrImpl[Data, Meta]) maybeMergeWithLeft(id int) {
+func (s *crAddImpl[Data, Meta]) maybeMergeWithLeft(id int) {
 	lookup := s.r.Info(id)
 	if lookup.Id == 0 {
 		panic("can't find node for maybeMergeWithLeft")
@@ -113,11 +126,11 @@ func (s *serverCrImpl[Data, Meta]) maybeMergeWithLeft(id int) {
 	s.r.InsertIdAfter(leftLookup.Prev, right.id, len(right.data), right)
 }
 
-func (s *serverCrImpl[Data, Meta]) Len() int {
+func (s *crAddImpl[Data, Meta]) Len() int {
 	return s.len
 }
 
-func (s *serverCrImpl[Data, Meta]) PositionFor(id int) int {
+func (s *crAddImpl[Data, Meta]) PositionFor(id int) int {
 	node, at := s.lookupNode(id)
 	if node == nil {
 		return -1
@@ -127,7 +140,7 @@ func (s *serverCrImpl[Data, Meta]) PositionFor(id int) int {
 	return nodePosition + at
 }
 
-func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
+func (s *crAddImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
 	l := len(data)
 	if l == 0 {
 		return
@@ -172,7 +185,7 @@ func (s *serverCrImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Me
 	return id, true
 }
 
-func (s *serverCrImpl[Data, Meta]) Iter() iter.Seq2[int, []Data] {
+func (s *crAddImpl[Data, Meta]) Iter() iter.Seq2[int, []Data] {
 	return func(yield func(int, []Data) bool) {
 		inner := s.r.Iter(0)
 		inner(func(id int, dl rope.DataLen[*internalNode[[]Data, Meta]]) bool {
