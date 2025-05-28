@@ -1,8 +1,6 @@
 package cr
 
 import (
-	"log"
-
 	"github.com/samthor/thorgo/aatree"
 	"github.com/samthor/thorgo/rope"
 )
@@ -201,10 +199,9 @@ func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 		}
 
 		// piggyback to delete from rope
-		prev := ro.extentRope.Info(first.start.id).Prev
-		deleted := ro.extentRope.DeleteTo(prev, last.start.id)
+		prev := ro.extentRope.Info(first.end.id).Prev
+		deleted := ro.extentRope.DeleteTo(prev, last.end.id)
 		if deleted != len(toMerge) {
-			log.Fatalf("deleted=%d len=%d rope=%+v prev=%v id=%v", deleted, len(toMerge), ro.extentRope.Count(), prev, last.start.id)
 			panic("rope couldn't delete expected entries")
 		}
 	}
@@ -250,11 +247,9 @@ func (ro *rangeOver[Id]) Mark(a, b Id) ([]Id, int, bool) {
 	lastExtent, _ := ro.extentTree.Before(extent.start)
 	var insertRopeAfter Id
 	if lastExtent != nil {
-		insertRopeAfter = lastExtent.state.start.id
+		insertRopeAfter = lastExtent.state.end.id
 	}
-	log.Printf("deleting low/high %v/%v delta=%d modDelta=%d", low, high, delta, lengthDelta)
-	if !ro.extentRope.InsertIdAfter(insertRopeAfter, extent.start.id, delta, extent) {
-		log.Fatalf("deleting insert after=%v start=%v", insertRopeAfter, extent.start.id)
+	if !ro.extentRope.InsertIdAfter(insertRopeAfter, extent.end.id, delta, extent) {
 		panic("can't delete marked range")
 	}
 
@@ -310,7 +305,7 @@ func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
 	}
 
 	// delete/add to rope with updated length
-	info := ro.extentRope.Info(e.start.id)
+	info := ro.extentRope.Info(e.end.id)
 	ro.extentRope.DeleteTo(info.Prev, info.Id)
 	ro.extentRope.InsertIdAfter(info.Prev, info.Id, info.Len+by, e)
 
@@ -334,7 +329,7 @@ func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, 
 	}
 
 	// remove from rope
-	info := ro.extentRope.Info(sourceExtent.start.id)
+	info := ro.extentRope.Info(sourceExtent.end.id)
 	ro.extentRope.DeleteTo(info.Prev, info.Id)
 	insertAfter := info.Prev
 
@@ -393,8 +388,8 @@ func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, 
 		delta, _ := ro.config.Between(active.start.id, active.end.id)
 		lengthDelta += delta
 
-		ro.extentRope.InsertIdAfter(insertAfter, active.start.id, delta, active)
-		insertAfter = active.start.id
+		ro.extentRope.InsertIdAfter(insertAfter, active.end.id, delta, active)
+		insertAfter = active.end.id
 
 		active = nil
 		lastId = node.id
@@ -429,6 +424,6 @@ func (ro *rangeOver[Id]) DeltaFor(id Id) int {
 	}
 
 	var zeroId Id
-	delta, _ := ro.extentRope.Between(zeroId, left.state.start.id)
+	delta, _ := ro.extentRope.Between(zeroId, left.state.end.id)
 	return delta + innerDelta
 }

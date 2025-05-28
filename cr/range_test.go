@@ -163,8 +163,13 @@ func TestDeltaFor(t *testing.T) {
 	}
 
 	r.Mark("d", "f")
-	if r.DeltaFor("e") != 4 {
-		t.Errorf("should be...")
+	if r.DeltaFor("e") != 12 {
+		t.Errorf("should be...: %v", r.DeltaFor("e"))
+	}
+
+	r.Mark("", "a")
+	if r.DeltaFor("e") != 17 {
+		t.Errorf("should be...: %v", r.DeltaFor("e"))
 	}
 
 }
