@@ -119,3 +119,38 @@ func TestMultiMerge(t *testing.T) {
 		t.Errorf("invalid delta for total delete")
 	}
 }
+
+func TestRelease(t *testing.T) {
+	_, r := prepareSample()
+
+	r.Mark("b", "f")
+	if newlyReleased, delta, ok := r.Release("e", "f"); !ok ||
+		delta != -6 ||
+		!reflect.DeepEqual(newlyReleased, []string{"e", "f"}) {
+		t.Errorf("bad release: delta=%v newlyReleased=%v", delta, newlyReleased)
+	}
+
+	// same output because [b,e] is still blocked
+	r.Mark("b", "f")
+	if newlyReleased, delta, ok := r.Release("b", "f"); !ok ||
+		delta != -6 ||
+		!reflect.DeepEqual(newlyReleased, []string{"e", "f"}) {
+		t.Errorf("bad release: delta=%v newlyReleased=%v", delta, newlyReleased)
+	}
+
+	if newlyReleased, delta, ok := r.Release("c", "b"); !ok ||
+		delta != -4 ||
+		!reflect.DeepEqual(newlyReleased, []string{"b", "c"}) {
+		t.Errorf("bad release: delta=%v newlyReleased=%v", delta, newlyReleased)
+	}
+
+	if newlyReleased, delta, ok := r.Release("c", "e"); !ok ||
+		delta != -14 ||
+		!reflect.DeepEqual(newlyReleased, []string{"c", "e"}) {
+		t.Errorf("bad release: delta=%v newlyReleased=%v", delta, newlyReleased)
+	}
+
+	if _, _, ok := r.Release("c", "e"); ok {
+		t.Errorf("should not release")
+	}
+}

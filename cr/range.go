@@ -5,13 +5,13 @@ import (
 )
 
 // rangeOverConfig is the subset of rope.Rope needed to maintain range information.
-type rangeOverConfig[Id any] interface {
+type rangeOverConfig[Id comparable] interface {
 	Between(a, b Id) (distance int, ok bool)
 	Compare(a, b Id) (cmp int, ok bool)
 }
 
 // extentState contains all inner nodes to a single extent.
-type extentState[Id any] struct {
+type extentState[Id comparable] struct {
 	start    *extentNode[Id]
 	end      *extentNode[Id]
 	internal *aatree.AATree[*rangeNode[Id]] // contains internal +ve and -ve
@@ -41,28 +41,31 @@ func (es *extentState[Id]) mod(id Id, by int) bool {
 	return true
 }
 
-type extentNode[Id any] struct {
+type extentNode[Id comparable] struct {
 	id    Id
 	start bool
 	state *extentState[Id]
 }
 
-type rangeOver[Id any] struct {
+type rangeOver[Id comparable] struct {
 	config       rangeOverConfig[Id]
 	extentTree   *aatree.AATree[*extentNode[Id]]
 	rangeCompare func(a, b *rangeNode[Id]) int
 	delta        int // maintained delta over underlying rope
 }
 
-type rangeNode[Id any] struct {
+type rangeNode[Id comparable] struct {
 	id    Id
 	delta int
 }
 
-type CrRange[Id any] interface {
+type CrRange[Id comparable] interface {
 	// Mark marks the given range.
 	// Returns false if the range is zero or invalid.
 	Mark(a, b Id) (newlyIncluded []Id, delta int, ok bool)
+
+	// Release is the opposite of Mark, releasing the given range.
+	Release(a, b Id) (newlyVisible []Id, delta int, ok bool)
 
 	// ExtentCount returns the number of unique extent ranges here.
 	ExtentCount() int
@@ -75,7 +78,7 @@ type CrRange[Id any] interface {
 	Grow(after Id, by int) bool
 }
 
-func NewRange[Id any](config rangeOverConfig[Id]) CrRange[Id] {
+func NewRange[Id comparable](config rangeOverConfig[Id]) CrRange[Id] {
 	extentCompare := func(a, b *extentNode[Id]) int {
 		c, _ := config.Compare(a.id, b.id)
 		return c
@@ -276,10 +279,97 @@ func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
 	e := ro.extentFor(after)
 	if e == nil {
 		return false // not within extent
-	} else if cmp, _ := ro.config.Compare(e.end.id, after); cmp == 0 {
-		return false // nothing to do, after extent
+	} else if e.end.id == after {
+		return false // nothing to do, at very end of extent (will be added)
 	}
 
 	ro.delta += by
 	return true
+}
+
+func (ro *rangeOver[Id]) Release(a, b Id) (newlyReleased []Id, lengthDelta int, ok bool) {
+	c, _ := ro.config.Compare(a, b)
+	if c == 0 {
+		// either same, _or_ zero value (because ok is false)
+		return nil, 0, false
+	} else if c > 0 {
+		// swap to correct order
+		a, b = b, a
+	}
+
+	sourceExtent := ro.extentFor(a)
+	if sourceExtent == nil || sourceExtent != ro.extentFor(b) {
+		// invalid: cannot release what was not cleanly marked
+		return
+	}
+
+	// we can create 0-n new extents here
+	// TODO: for now we lazily reinsert everything (gross)
+
+	lengthDelta, _ = ro.config.Between(sourceExtent.start.id, sourceExtent.end.id)
+	lengthDelta = -lengthDelta
+
+	ro.extentTree.Remove(sourceExtent.start)
+	ro.extentTree.Remove(sourceExtent.end)
+	sourceExtent.mod(a, -1)
+	sourceExtent.mod(b, +1)
+
+	var active *extentState[Id]
+	var count int
+
+	lastId := sourceExtent.start.id
+
+	for node := range sourceExtent.internal.Iter() {
+
+		if active == nil {
+			if lastId != node.id {
+				newlyReleased = append(newlyReleased, lastId, node.id)
+			}
+
+			if node.delta <= 0 || count != 0 {
+				panic("bad delta for start")
+			}
+
+			active = &extentState[Id]{
+				internal: aatree.New(ro.rangeCompare),
+				start: &extentNode[Id]{
+					id:    node.id,
+					start: true,
+				},
+				end: &extentNode[Id]{
+					// we don't know its final ID yet
+				},
+			}
+			active.start.state = active
+			active.end.state = active
+		}
+
+		active.mod(node.id, node.delta)
+		count += node.delta
+
+		if count == 0 {
+			active.end.id = node.id
+			ro.extentTree.Insert(active.start)
+			ro.extentTree.Insert(active.end)
+
+			delta, _ := ro.config.Between(active.start.id, active.end.id)
+			lengthDelta += delta
+
+			active = nil
+			lastId = node.id
+		}
+	}
+
+	if lastId != sourceExtent.end.id {
+		newlyReleased = append(newlyReleased, lastId, sourceExtent.end.id)
+	}
+
+	if active != nil || count != 0 {
+		panic("no node closure")
+	} else if lengthDelta > 0 {
+		panic("lengthDelta must be -ve or 0")
+	}
+
+	ro.delta += lengthDelta
+	return newlyReleased, lengthDelta, true
 }
