@@ -9,7 +9,7 @@ func encodeString(s string) []uint16 {
 	return utf16.Encode([]rune(s))
 }
 
-func flattenCr(cr *crAddImpl[uint16, struct{}]) string {
+func flattenCr[T comparable](cr *crAddImpl[uint16, T]) string {
 	out := make([]uint16, 0, cr.Len())
 
 	for _, data := range cr.Iter() {
@@ -72,5 +72,35 @@ func TestCrAdd(t *testing.T) {
 	}
 	if cr.PositionFor(questionSeq-1) != 5 {
 		t.Errorf("question-1 was not at 5, got=%d", cr.PositionFor(questionSeq-1))
+	}
+}
+
+func TestOps(t *testing.T) {
+	cr := newCrAdd[uint16, int]()
+
+	thereId, _ := cr.PerformAppend(0, encodeString(" there"), 100)
+	helloId, _ := cr.PerformAppend(0, encodeString("hello"), 200)
+	bobId, _ := cr.PerformAppend(thereId, encodeString(", bob!"), 300)
+
+	if flattenCr(cr) != "hello there, bob!" {
+		t.Error("bad cr: %V", flattenCr(cr))
+	}
+
+	if cmp, _ := cr.Compare(bobId, helloId); cmp <= 0 {
+		t.Errorf("expected +ve compare, was: %v", cmp)
+	}
+	if distance, _ := cr.Between(helloId, bobId); distance != 12 {
+		t.Errorf("expected distance, was: %v", distance)
+	}
+
+	if distance, _ := cr.Between(helloId, bobId-2); distance != 10 {
+		t.Errorf("expected distance, was: %v", distance)
+	}
+
+	if distance, _ := cr.Between(bobId-3, bobId-2); distance != 1 {
+		t.Errorf("expected distance, was: %v", distance)
+	}
+	if cmp, _ := cr.Compare(bobId-3, bobId-2); cmp <= 0 {
+		t.Errorf("expected +ve compare, was: %v", cmp)
 	}
 }

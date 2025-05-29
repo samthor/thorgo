@@ -23,6 +23,8 @@ type DataLen[T any] struct {
 // It is not goroutine-safe.
 // The zero Id is always part of the Rope and has zero length, don't use it to add items.
 type Rope[Id comparable, T any] interface {
+	DebugPrint()
+
 	// Returns the total sum of the parts of the rope. O(1).
 	Len() int
 

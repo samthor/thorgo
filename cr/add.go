@@ -10,9 +10,12 @@ import (
 func newCrAdd[Data any, Meta comparable]() *crAddImpl[Data, Meta] {
 	rope := rope.New[int, *internalNode[[]Data, Meta]]()
 
+	idTree := aatree.New(func(a, b *internalNode[[]Data, Meta]) int { return a.id - b.id })
+	idTree.Insert(&internalNode[[]Data, Meta]{}) // zero node (id=0 etc)
+
 	return &crAddImpl[Data, Meta]{
 		r:      rope,
-		idTree: aatree.New(func(a, b *internalNode[[]Data, Meta]) int { return a.id - b.id }),
+		idTree: idTree,
 	}
 }
 
@@ -29,33 +32,11 @@ type crAddImpl[Data any, Meta comparable] struct {
 	idTree  *aatree.AATree[*internalNode[[]Data, Meta]]
 }
 
-func (s *crAddImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data, Meta], at int) {
-	if id <= 0 {
-		return
-	}
-
-	nearest, _ := s.idTree.EqualAfter(&internalNode[[]Data, Meta]{id: id})
-	if nearest == nil {
-		return // no possible entry
-	}
-
-	at = len(nearest.data) - (nearest.id - id)
-	if at < 0 {
-		return
-	}
-
-	return nearest, at
-}
-
 func (s *crAddImpl[Data, Meta]) ensureEdge(id int) bool {
-	if id == 0 {
-		return true
-	}
-
-	nearest, at := s.lookupNode(id)
+	nearest, offset := s.lookupNode(id)
 	if nearest == nil {
 		return false // no possible entry
-	} else if at == len(nearest.data) {
+	} else if offset == 0 {
 		return true // we're on an edge already
 	}
 
@@ -67,6 +48,7 @@ func (s *crAddImpl[Data, Meta]) ensureEdge(id int) bool {
 		panic("should delete just found node")
 	}
 
+	at := len(nearest.data) - offset
 	left := nearest.data[0:at]
 	nearest.data = nearest.data[at:]
 	newNode := &internalNode[[]Data, Meta]{id: id, data: left, meta: nearest.meta}
@@ -118,13 +100,14 @@ func (s *crAddImpl[Data, Meta]) Len() int {
 }
 
 func (s *crAddImpl[Data, Meta]) PositionFor(id int) int {
-	node, at := s.lookupNode(id)
+	node, offset := s.lookupNode(id)
 	if node == nil {
 		return -1
 	}
 
+	// finds the START of this id
 	nodePosition := s.r.Find(node.id)
-	return nodePosition + at
+	return nodePosition + len(node.data) - offset
 }
 
 func (s *crAddImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
@@ -179,4 +162,143 @@ func (s *crAddImpl[Data, Meta]) Iter() iter.Seq2[int, []Data] {
 			return yield(id, dl.Data.data)
 		})
 	}
+}
+
+func (s *crAddImpl[Data, Meta]) Read(a, b int) iter.Seq[crRead[Data, Meta]] {
+	return func(yield func(crRead[Data, Meta]) bool) {
+		startNode, startOffset, endNode, endOffset, ok := s.lookupNodePair(a, b)
+		if !ok {
+			return
+		}
+
+		// special-case single node
+		if startNode == endNode {
+			if endOffset >= startOffset {
+				return // nothing
+			}
+			n := startNode
+			l := len(n.data)
+			slice := n.data[l-startOffset : l-endOffset]
+
+			yield(crRead[Data, Meta]{
+				id:   n.id - endOffset,
+				data: slice,
+				meta: n.meta,
+			})
+			return
+		}
+
+		// nodes might be in wrong order
+		if cmp, _ := s.r.Compare(startNode.id, endNode.id); cmp > 0 {
+			return
+		}
+
+		// yield start
+		startData := startNode.data[len(startNode.data)-startOffset:]
+		if len(startData) != 0 && !yield(crRead[Data, Meta]{
+			id:   startNode.id,
+			data: startData,
+			meta: startNode.meta,
+		}) {
+			return
+		}
+
+		// yield mid nodes
+		for id, dl := range s.r.Iter(startNode.id) {
+			if id == endNode.id {
+				break
+			}
+			if !yield(crRead[Data, Meta]{
+				id:   id,
+				data: dl.Data.data,
+				meta: dl.Data.meta,
+			}) {
+				return
+			}
+		}
+
+		// yield end
+		yield(crRead[Data, Meta]{
+			id:   endNode.id - endOffset,
+			data: endNode.data[:len(endNode.data)-endOffset],
+			meta: endNode.meta,
+		})
+	}
+}
+
+type crRead[Data, Meta any] struct {
+	id   int    // end seq
+	data []Data // underlying data
+	meta Meta
+}
+
+func (s *crAddImpl[Data, Meta]) lookupNode(id int) (node *internalNode[[]Data, Meta], offset int) {
+	nearest, _ := s.idTree.EqualAfter(&internalNode[[]Data, Meta]{id: id})
+	if nearest == nil {
+		return // no possible entry
+	}
+
+	offset = nearest.id - id
+	if offset != 0 && offset >= len(nearest.data) {
+		return
+	}
+
+	return nearest, offset
+}
+
+func (s *crAddImpl[Data, Meta]) lookupNodePair(a, b int) (
+	laNode *internalNode[[]Data, Meta],
+	laOffset int,
+	lbNode *internalNode[[]Data, Meta],
+	lbOffset int,
+	ok bool,
+) {
+	laNode, laOffset = s.lookupNode(a)
+	if laNode == nil {
+		return
+	}
+
+	lbOffset = laNode.id - b
+	if lbOffset >= 0 && lbOffset < len(laNode.data) {
+		lbNode = laNode
+		ok = true
+		return
+	}
+
+	lbNode, lbOffset = s.lookupNode(b)
+	if lbNode == nil {
+		return
+	}
+
+	ok = true
+	return
+}
+
+func (s *crAddImpl[Data, Meta]) Between(a, b int) (distance int, ok bool) {
+	laNode, laOffset, lbNode, lbOffset, ok := s.lookupNodePair(a, b)
+	if !ok {
+		return
+	}
+
+	localOffset := laOffset - lbOffset
+	if laNode == lbNode {
+		return localOffset, true
+	}
+
+	distance, ok = s.r.Between(laNode.id, lbNode.id)
+	distance += localOffset
+	return
+}
+
+func (s *crAddImpl[Data, Meta]) Compare(a, b int) (cmp int, ok bool) {
+	laNode, laOffset, lbNode, lbOffset, ok := s.lookupNodePair(a, b)
+	if !ok {
+		return
+	}
+
+	if laNode == lbNode {
+		return laOffset - lbOffset, true
+	}
+
+	return s.r.Compare(laNode.id, lbNode.id)
 }

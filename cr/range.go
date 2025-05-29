@@ -1,6 +1,8 @@
 package cr
 
 import (
+	"iter"
+
 	"github.com/samthor/thorgo/aatree"
 	"github.com/samthor/thorgo/rope"
 )
@@ -404,4 +406,67 @@ func (ro *rangeOver[Id]) DeltaFor(id Id) int {
 	var zeroId Id
 	delta, _ := ro.extentRope.Between(zeroId, left.state.end.id)
 	return delta + innerDelta
+}
+
+func (ro *rangeOver[Id]) Iter() iter.Seq2[Id, Id] {
+	return func(yield func(Id, Id) bool) {
+		i := ro.extentTree.Iter()
+		pull, stop := iter.Pull(i)
+		defer stop()
+
+		for {
+			start, ok1 := pull()
+			if !ok1 {
+				break
+			}
+
+			end, ok2 := pull()
+			if !start.start || end.start || !ok2 {
+				panic("invalid rangeOver start bool")
+			}
+
+			if !yield(start.id, end.id) {
+				return
+			}
+		}
+	}
+}
+
+func (ro *rangeOver[Id]) ValidIter(low, high Id) iter.Seq2[Id, Id] {
+	return func(yield func(Id, Id) bool) {
+		i := ro.extentTree.Iter()
+		pull, stop := iter.Pull(i)
+		defer stop()
+
+		curr := low
+
+		for {
+			start, ok1 := pull()
+			if !ok1 {
+				break
+			}
+
+			end, ok2 := pull()
+			if !start.start || end.start || !ok2 {
+				panic("invalid rangeOver start bool")
+			}
+
+			// log.Printf("got extent: %v/%v", start.id, end.id)
+
+			// yield previous segment
+			if curr != start.id {
+				// log.Printf("yielding safe range: %v/%v", curr, start.id)
+				if !yield(curr, start.id) {
+					return
+				}
+			}
+
+			curr = end.id
+		}
+
+		if curr != high {
+			// log.Printf("yielding safe trailer: %v/%v", curr, high)
+			yield(curr, high)
+		}
+	}
 }

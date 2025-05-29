@@ -89,6 +89,7 @@ func (r *ropeImpl[Id, T]) DebugPrint() {
 		}
 
 		// add actual data
+		parts = append(parts, "id="+r.toString(curr.id))
 		parts = append(parts, r.toString(curr.dl.Data))
 
 		// render
@@ -111,7 +112,7 @@ func (r *ropeImpl[Id, T]) DebugPrint() {
 }
 
 // toString is a helper to render data, only for DebugPrint.
-func (r *ropeImpl[Id, T]) toString(data T) string {
+func (r *ropeImpl[Id, T]) toString(data any) string {
 	type stringable interface {
 		String() string
 	}
@@ -120,6 +121,9 @@ func (r *ropeImpl[Id, T]) toString(data T) string {
 	}
 	if s, ok := any(data).(string); ok {
 		return s
+	}
+	if s, ok := any(data).(int); ok {
+		return fmt.Sprintf("%d", s)
 	}
 	return ""
 }

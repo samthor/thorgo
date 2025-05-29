@@ -2,6 +2,7 @@ package cr
 
 type ServerCr[Data any, Meta comparable] interface {
 	Len() int
+	Serialize() *ServerCrState[Data]
 
 	// HighSeq returns the high node ID.
 	// Will be zero at start.
@@ -28,9 +29,9 @@ type serverImpl[Data any, Meta comparable] struct {
 // New creates a new ServerCr.
 // TODO: it can't really be _used_ yet
 func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
-	ca := newCrAdd[Data, Meta]()
-	ro := newRange(ca.r)
-	return &serverImpl[Data, Meta]{ca: ca, ro: ro}
+	out := &serverImpl[Data, Meta]{ca: newCrAdd[Data, Meta]()}
+	out.ro = newRange(out.ca)
+	return out
 }
 
 func (s *serverImpl[Data, Meta]) Len() int {
@@ -56,4 +57,34 @@ func (s *serverImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta
 func (s *serverImpl[Data, Meta]) PerformDelete(after, until int) (delta int, ok bool) {
 	_, delta, ok = s.ro.Mark(after, until)
 	return
+}
+
+// Serialize returns data ready for a "normal" client to use, with no deleted data.
+func (s *serverImpl[Data, Meta]) Serialize() *ServerCrState[Data] {
+	var seq []int
+	var parts [][]Data
+	var dataLen int
+	var lastId int
+
+	for a, b := range s.ro.ValidIter(0, s.ca.r.LastId()) {
+		for part := range s.ca.Read(a, b) {
+			parts = append(parts, part.data)
+			dataLen += len(part.data)
+
+			delta := part.id - lastId
+			seq = append(seq, len(part.data), delta)
+			lastId = part.id
+		}
+	}
+
+	out := make([]Data, 0, dataLen)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return &ServerCrState[Data]{Data: out, Seq: seq}
+}
+
+type ServerCrState[Data any] struct {
+	Data []Data // underlying data in run
+	Seq  []int  // pairs of [length,seqDelta]
 }
