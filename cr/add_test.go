@@ -100,7 +100,7 @@ func TestOps(t *testing.T) {
 	if distance, _ := cr.Between(bobId-3, bobId-2); distance != 1 {
 		t.Errorf("expected distance, was: %v", distance)
 	}
-	if cmp, _ := cr.Compare(bobId-3, bobId-2); cmp <= 0 {
-		t.Errorf("expected +ve compare, was: %v", cmp)
+	if cmp, _ := cr.Compare(bobId-3, bobId-2); cmp >= 0 {
+		t.Errorf("expected -ve compare, was: %v", cmp)
 	}
 }

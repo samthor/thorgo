@@ -272,7 +272,7 @@ func (ro *rangeOver[Id]) Delta() int {
 	return ro.extentRope.Len()
 }
 
-func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
+func (ro *rangeOver[Id]) Grow(after Id, by int, newId Id) bool {
 	if by <= 0 {
 		panic("cannot Grow by zero or -ve data")
 	}
@@ -280,15 +280,45 @@ func (ro *rangeOver[Id]) Grow(after Id, by int) bool {
 	e := ro.extentFor(after)
 	if e == nil {
 		return false // not within extent
-	} else if e.end.id == after {
-		return false // nothing to do, at very end of extent (will be added)
+	} else if e.start.id == after {
+		// insert at very start: move whole range forward (new text is valid)
+
+		ro.extentTree.Remove(e.start)
+		e.start.id = newId
+		ro.extentTree.Insert(e.start)
+
+		first, ok := e.internal.Low()
+		if !ok {
+			panic("could not get internal Low")
+		}
+		e.internal.Remove(first)
+		first.id = newId
+		e.internal.Insert(first)
+
+		return false // nothing to do, at very start of extent (will be added as we attach "before")
 	}
 
 	// delete/add to rope with updated length
 	info := ro.extentRope.Info(e.end.id)
-	ro.extentRope.DeleteTo(info.Prev, info.Id)
-	ro.extentRope.InsertIdAfter(info.Prev, info.Id, info.Len+by, e)
+	ro.extentRope.DeleteTo(info.Prev, e.end.id)
 
+	if e.end.id == after {
+		// insert at very end: extend range (because we've organized it by this end id)
+
+		ro.extentTree.Remove(e.end)
+		e.end.id = newId
+		ro.extentTree.Insert(e.end)
+
+		last, ok := e.internal.High()
+		if !ok {
+			panic("could not get internal High")
+		}
+		e.internal.Remove(last)
+		last.id = newId
+		e.internal.Insert(last)
+	}
+
+	ro.extentRope.InsertIdAfter(info.Prev, e.end.id, info.Len+by, e)
 	return true
 }
 

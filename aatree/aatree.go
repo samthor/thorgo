@@ -56,6 +56,18 @@ func (t *AATree[X]) Low() (out X, ok bool) {
 	return node.data, true
 }
 
+// High returns the low node from this tree.
+func (t *AATree[X]) High() (out X, ok bool) {
+	if t.root == nil {
+		return
+	}
+	node := t.root
+	for node.right != nil {
+		node = node.right
+	}
+	return node.data, true
+}
+
 // Clear removes all elements from the tree.
 func (t *AATree[X]) Clear() {
 	t.root = nil

@@ -24,17 +24,44 @@ func TestServerCr(t *testing.T) {
 	if decodeString(s.Data) != "hello there" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
-
 	if !reflect.DeepEqual(s.Seq, []int{5, 11, 6, -5}) {
 		t.Errorf("bad seq: %+v", s.Seq)
 	}
 
-	if delta, ok := cr.PerformDelete(0, 2); !ok || delta != 7 {
+	if delta, ok := cr.PerformDelete(2, 2); !ok || delta != 1 {
 		t.Errorf("couldn't delete, delta=%v", delta)
 	}
 
 	s = cr.Serialize()
-	if decodeString(s.Data) != "here" {
+	if decodeString(s.Data) != "hello here" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
+	if !reflect.DeepEqual(s.Seq, []int{5, 11, 1, -10, 4, 5}) {
+		t.Errorf("bad seq: %+v", s.Seq)
+	}
+
+	deleted, ok := cr.PerformAppend(1, encodeString("x"), nonce)
+	if deleted || !ok {
+		t.Fatalf("could not append before deletion")
+	}
+	s = cr.Serialize()
+	if decodeString(s.Data) != "hello xhere" {
+		t.Errorf("bad serialized data: %v", decodeString(s.Data))
+	}
+	if !reflect.DeepEqual(s.Seq, []int{5, 11, 1, -10, 1, 11, 4, -6}) {
+		t.Errorf("bad seq: %+v", s.Seq)
+	}
+
+	deleted, ok = cr.PerformAppend(2, encodeString("X"), nonce)
+	if !ok || !deleted {
+		t.Errorf("expected deleted insert")
+	}
+	s = cr.Serialize()
+	if decodeString(s.Data) != "hello xhere" {
+		t.Errorf("bad serialized data: %v", decodeString(s.Data))
+	}
+	if !reflect.DeepEqual(s.Seq, []int{5, 11, 1, -10, 1, 11, 4, -6}) {
+		t.Errorf("bad seq: %+v", s.Seq)
+	}
+
 }

@@ -296,9 +296,27 @@ func (s *crAddImpl[Data, Meta]) Compare(a, b int) (cmp int, ok bool) {
 		return
 	}
 
+	// nb. the result is always negative compared to Between
+
 	if laNode == lbNode {
-		return laOffset - lbOffset, true
+		return lbOffset - laOffset, true
 	}
 
 	return s.r.Compare(laNode.id, lbNode.id)
+}
+
+func (s *crAddImpl[Data, Meta]) LeftOf(id int) int {
+	if id <= 0 {
+		return -1
+	}
+
+	node, offset := s.lookupNode(id)
+	if node == nil {
+		return -1
+	}
+
+	if offset < len(node.data)-1 {
+		return id - 1
+	}
+	return s.r.Info(node.id).Prev
 }

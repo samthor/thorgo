@@ -88,7 +88,7 @@ func TestRange(t *testing.T) {
 	}
 
 	rr.InsertIdAfter("d", "d1", 100, "")
-	if !r.Grow("d", 100) {
+	if !r.Grow("d", 100, "d1") {
 		t.Errorf("should have grown by 1009")
 	}
 	if r.Delta() != 129 {
@@ -171,4 +171,20 @@ func TestDeltaFor(t *testing.T) {
 		t.Errorf("should be...: %v", r.DeltaFor("e"))
 	}
 
+}
+
+func TestMarkLeft(t *testing.T) {
+	rr, r := prepareSample()
+
+	r.Mark("b", "c")
+	if r.Delta() != 4 {
+		t.Errorf("expected delta...")
+	}
+
+	rr.InsertIdAfter("b", "b1", 100, "hello")
+	r.Grow("b", 100, "b1")
+
+	if r.Delta() != 4 {
+		t.Errorf("expected delta to be same")
+	}
 }

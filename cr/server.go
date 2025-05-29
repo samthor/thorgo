@@ -14,11 +14,11 @@ type ServerCr[Data any, Meta comparable] interface {
 	// PerformAppend inserts data after the prior node.
 	// Returns true if the data was inserted, but false if the prior node could not be found.
 	// Returns the new ID of the data. (TODO: doesn't need to)
-	PerformAppend(after int, data []Data, meta Meta) (now int, ok bool)
+	PerformAppend(after int, data []Data, meta Meta) (deleted, ok bool)
 
 	// PerformDelete marks the given range as deleted.
-	// It does not actually delete anything.
-	PerformDelete(after, until int) (delta int, ok bool)
+	// Note that both values are used to point directly to node(s), so it is valid for both values to be equal (and deletion of "one" will occur).
+	PerformDelete(from, until int) (delta int, ok bool)
 }
 
 type serverImpl[Data any, Meta comparable] struct {
@@ -46,16 +46,25 @@ func (s *serverImpl[Data, Meta]) PositionFor(id int) int {
 	return s.ca.PositionFor(id) - s.ro.DeltaFor(id)
 }
 
-func (s *serverImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {
-	now, ok = s.ca.PerformAppend(after, data, meta)
+func (s *serverImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (deleted, ok bool) {
+	now, ok := s.ca.PerformAppend(after, data, meta)
 	if ok {
-		s.ro.Grow(after, len(data))
+		deleted = s.ro.Grow(after, len(data), now)
 	}
-	return
+	return deleted, ok
 }
 
-func (s *serverImpl[Data, Meta]) PerformDelete(after, until int) (delta int, ok bool) {
-	_, delta, ok = s.ro.Mark(after, until)
+func (s *serverImpl[Data, Meta]) PerformDelete(from, until int) (delta int, ok bool) {
+	if cmp, _ := s.ca.Compare(from, until); cmp > 0 {
+		until, from = from, until
+	}
+
+	// unlike this call, Mark does work on "boundaries", so we move to the left by one
+	leftOf := s.ca.LeftOf(from)
+	if leftOf == -1 {
+		return
+	}
+	_, delta, ok = s.ro.Mark(leftOf, until)
 	return
 }
 
