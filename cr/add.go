@@ -320,3 +320,26 @@ func (s *crAddImpl[Data, Meta]) LeftOf(id int) int {
 	}
 	return s.r.Info(node.id).Prev
 }
+
+func (s *crAddImpl[Data, Meta]) RightOf(id int) int {
+	if id < 0 {
+		return -1
+	}
+
+	node, offset := s.lookupNode(id)
+	if node == nil {
+		return -1
+	}
+
+	if offset > 0 {
+		return id + 1
+	}
+
+	nextId := s.r.Info(id).Next
+	if nextId == 0 {
+		return -1 // in case someone tries to go off the end
+	}
+	info := s.r.Info(nextId)
+
+	return info.Data.id - len(info.Data.data) + 1
+}

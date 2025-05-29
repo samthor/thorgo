@@ -33,7 +33,7 @@ func (s *serverImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta
 	return deleted, ok
 }
 
-func (s *serverImpl[Data, Meta]) PerformDelete(from, until int) (delta int, ok bool) {
+func (s *serverImpl[Data, Meta]) PerformDelete(from, until int) (a, b int, ok bool) {
 	if cmp, _ := s.ca.Compare(from, until); cmp > 0 {
 		until, from = from, until
 	}
@@ -43,31 +43,47 @@ func (s *serverImpl[Data, Meta]) PerformDelete(from, until int) (delta int, ok b
 	if leftOf == -1 {
 		return
 	}
-	_, delta, ok = s.ro.Mark(leftOf, until)
-	return
+	newlyIncluded, _, ok := s.ro.Mark(leftOf, until)
+	if !ok {
+		return
+	}
+
+	if len(newlyIncluded) != 0 {
+		a = s.ca.RightOf(newlyIncluded[0])
+		if a == -1 {
+			panic("invalid RightOf")
+		}
+		b = newlyIncluded[len(newlyIncluded)-1]
+	}
+	return a, b, true
 }
 
-// Serialize returns data ready for a "normal" client to use, with no deleted data.
-func (s *serverImpl[Data, Meta]) Serialize() *ServerCrState[Data] {
-	var seq []int
+func (s serverImpl[Data, Meta]) LastSeq() int {
+	return s.ca.r.LastId()
+}
+
+func (s *serverImpl[Data, Meta]) Read(a, b int) *ServerCrState[Data, Meta] {
+	var state ServerCrState[Data, Meta]
 	var parts [][]Data
 	var dataLen int
 	var lastId int
 
-	for a, b := range s.ro.ValidIter(0, s.ca.r.LastId()) {
-		for part := range s.ca.Read(a, b) {
+	for ia, ib := range s.ro.ValidIter(a, b) {
+		for part := range s.ca.Read(ia, ib) {
 			parts = append(parts, part.data)
+			state.Meta = append(state.Meta, part.meta)
 			dataLen += len(part.data)
 
 			delta := part.id - lastId
-			seq = append(seq, len(part.data), delta)
+			state.Seq = append(state.Seq, len(part.data), delta)
 			lastId = part.id
 		}
 	}
 
-	out := make([]Data, 0, dataLen)
+	state.Data = make([]Data, 0, dataLen)
 	for _, p := range parts {
-		out = append(out, p...)
+		state.Data = append(state.Data, p...)
 	}
-	return &ServerCrState[Data]{Data: out, Seq: seq}
+
+	return &state
 }

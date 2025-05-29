@@ -10,25 +10,29 @@ func decodeString(raw []uint16) string {
 	return string(utf16.Decode(raw))
 }
 
+func serialize(cr ServerCr[uint16, struct{}]) *ServerCrState[uint16, struct{}] {
+	return cr.Read(0, cr.LastSeq())
+}
+
 func TestServerCr(t *testing.T) {
 
 	cr := New[uint16, struct{}]()
 	nonce := struct{}{}
 
-	if zero := cr.Serialize(); len(zero.Data) != 0 || len(zero.Seq) != 0 {
+	if zero := serialize(cr); len(zero.Data) != 0 || len(zero.Seq) != 0 {
 		t.Errorf("bad zero Serialize: %+v", zero)
 	}
 
 	cr.PerformAppend(0, encodeString(" there"), nonce)
 	cr.PerformAppend(0, encodeString("hello"), nonce)
 
-	if delta, ok := cr.PerformDelete(0, 0); ok || delta != 0 {
+	if _, _, ok := cr.PerformDelete(0, 0); ok {
 		t.Errorf("cannot delete zero node")
 	}
 
-	var s *ServerCrState[uint16]
+	var s *ServerCrState[uint16, struct{}]
 
-	s = cr.Serialize()
+	s = serialize(cr)
 	if decodeString(s.Data) != "hello there" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
@@ -36,15 +40,15 @@ func TestServerCr(t *testing.T) {
 		t.Errorf("bad seq: %+v", s.Seq)
 	}
 
-	if delta, ok := cr.PerformDelete(2, 0); ok || delta != 0 {
+	if _, _, ok := cr.PerformDelete(2, 0); ok {
 		t.Errorf("cannot delete with zero Node")
 	}
 
-	if delta, ok := cr.PerformDelete(2, 2); !ok || delta != 1 {
-		t.Errorf("couldn't delete, delta=%v", delta)
+	if a, b, ok := cr.PerformDelete(2, 2); !ok || a != 2 || b != 2 {
+		t.Errorf("newly deleted range incorrect [%d,	%d]", a, b)
 	}
 
-	s = cr.Serialize()
+	s = serialize(cr)
 	if decodeString(s.Data) != "hello here" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
@@ -56,7 +60,7 @@ func TestServerCr(t *testing.T) {
 	if deleted || !ok {
 		t.Fatalf("could not append before deletion")
 	}
-	s = cr.Serialize()
+	s = serialize(cr)
 	if decodeString(s.Data) != "hello xhere" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
@@ -68,7 +72,7 @@ func TestServerCr(t *testing.T) {
 	if !ok || !deleted {
 		t.Errorf("expected deleted insert")
 	}
-	s = cr.Serialize()
+	s = serialize(cr)
 	if decodeString(s.Data) != "hello xhere" {
 		t.Errorf("bad serialized data: %v", decodeString(s.Data))
 	}
