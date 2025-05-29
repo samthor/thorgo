@@ -1,26 +1,5 @@
 package cr
 
-type ServerCr[Data any, Meta comparable] interface {
-	Len() int
-	Serialize() *ServerCrState[Data]
-
-	// HighSeq returns the high node ID.
-	// Will be zero at start.
-	HighSeq() int
-
-	// PositionFor returns the position for the given ID.
-	PositionFor(id int) int
-
-	// PerformAppend inserts data after the prior node.
-	// Returns true if the data was inserted, but false if the prior node could not be found.
-	// Returns the new ID of the data. (TODO: doesn't need to)
-	PerformAppend(after int, data []Data, meta Meta) (deleted, ok bool)
-
-	// PerformDelete marks the given range as deleted.
-	// Note that both values are used to point directly to node(s), so it is valid for both values to be equal (and deletion of "one" will occur).
-	PerformDelete(from, until int) (delta int, ok bool)
-}
-
 type serverImpl[Data any, Meta comparable] struct {
 	ca *crAddImpl[Data, Meta]
 	ro *rangeOver[int]
@@ -91,9 +70,4 @@ func (s *serverImpl[Data, Meta]) Serialize() *ServerCrState[Data] {
 		out = append(out, p...)
 	}
 	return &ServerCrState[Data]{Data: out, Seq: seq}
-}
-
-type ServerCrState[Data any] struct {
-	Data []Data // underlying data in run
-	Seq  []int  // pairs of [length,seqDelta]
 }

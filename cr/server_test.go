@@ -15,8 +15,16 @@ func TestServerCr(t *testing.T) {
 	cr := New[uint16, struct{}]()
 	nonce := struct{}{}
 
+	if zero := cr.Serialize(); len(zero.Data) != 0 || len(zero.Seq) != 0 {
+		t.Errorf("bad zero Serialize: %+v", zero)
+	}
+
 	cr.PerformAppend(0, encodeString(" there"), nonce)
 	cr.PerformAppend(0, encodeString("hello"), nonce)
+
+	if delta, ok := cr.PerformDelete(0, 0); ok || delta != 0 {
+		t.Errorf("cannot delete zero node")
+	}
 
 	var s *ServerCrState[uint16]
 
@@ -26,6 +34,10 @@ func TestServerCr(t *testing.T) {
 	}
 	if !reflect.DeepEqual(s.Seq, []int{5, 11, 6, -5}) {
 		t.Errorf("bad seq: %+v", s.Seq)
+	}
+
+	if delta, ok := cr.PerformDelete(2, 0); ok || delta != 0 {
+		t.Errorf("cannot delete with zero Node")
 	}
 
 	if delta, ok := cr.PerformDelete(2, 2); !ok || delta != 1 {
