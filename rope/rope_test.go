@@ -114,8 +114,8 @@ func TestRope(t *testing.T) {
 			t.Errorf("expected +ve Id, was=%v", helloId)
 		}
 		helloAt := r.Find(helloId)
-		if helloAt != 0 {
-			t.Errorf("expected helloAt=0, was=%v", helloAt)
+		if helloAt != 5 {
+			t.Errorf("expected helloAt=5, was=%v", helloAt)
 		}
 
 		// insert " there"
@@ -131,8 +131,8 @@ func TestRope(t *testing.T) {
 		thereLookup := r.Info(thereId)
 		thereAt := r.Find(thereId)
 
-		if thereAt != 5 {
-			t.Errorf("expected thereAt=5, was=%v", thereAt)
+		if thereAt != 11 {
+			t.Errorf("expected thereAt=11, was=%v", thereAt)
 		}
 		if !reflect.DeepEqual(thereLookup, Info[int, string]{
 			Id:      thereId,
@@ -193,8 +193,8 @@ func TestRope(t *testing.T) {
 		if r.Len() != 6 {
 			t.Errorf("didn't reduce by hello size: wanted=%d, got=%d", 6, r.Len())
 		}
-		if thereAt = r.Find(thereId); thereAt != 0 {
-			t.Errorf("wrong there")
+		if thereAt = r.Find(thereId); thereAt != 6 {
+			t.Errorf("wrong there: %d", thereAt)
 		}
 		if r.Count() != 1 {
 			t.Errorf("expected count=1")

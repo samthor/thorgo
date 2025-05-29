@@ -31,7 +31,7 @@ type Rope[Id comparable, T any] interface {
 	// Returns the number of parts here. O(1).
 	Count() int
 
-	// Finds the position of the given Id.
+	// Finds the position after the given Id.
 	// This lookup costs ~O(logn).
 	Find(id Id) int
 

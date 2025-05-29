@@ -105,9 +105,8 @@ func (s *crAddImpl[Data, Meta]) PositionFor(id int) int {
 		return -1
 	}
 
-	// finds the START of this id
 	nodePosition := s.r.Find(node.id)
-	return nodePosition + len(node.data) - offset
+	return nodePosition - offset
 }
 
 func (s *crAddImpl[Data, Meta]) PerformAppend(after int, data []Data, meta Meta) (now int, ok bool) {

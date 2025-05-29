@@ -151,7 +151,7 @@ func (r *ropeImpl[Id, T]) Find(id Id) int {
 		pos += node.levels[link].subtreesize
 	}
 
-	return pos
+	return pos + e.dl.Len
 }
 
 func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
@@ -364,10 +364,7 @@ func (r *ropeImpl[Id, T]) Between(afterA, afterB Id) (distance int, ok bool) {
 		return
 	}
 
-	anode := r.byId[afterA]
-	bnode := r.byId[afterB]
-
-	return (posB + bnode.dl.Len) - (posA + anode.dl.Len), true
+	return posB - posA, true
 }
 
 func (r *ropeImpl[Id, T]) Compare(a, b Id) (cmp int, ok bool) {
