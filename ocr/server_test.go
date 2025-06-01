@@ -60,6 +60,10 @@ func TestServerCr(t *testing.T) {
 	if ser := cr.ReadAll(); decodeString(ser.Data) != "llotherehe" {
 		t.Errorf("bad serialization: %+v (%s)", ser, decodeString(ser.Data))
 	}
+
+	if cr.Len() != 10 {
+		t.Errorf("bad length: %v", cr.Len())
+	}
 }
 
 func TestMerge(t *testing.T) {
@@ -80,5 +84,28 @@ func TestMerge(t *testing.T) {
 	cr.PerformMove(1, 3, 0)
 	if ser := cr.ReadAll(); decodeString(ser.Data) != "123abcdef" || !reflect.DeepEqual(ser.Seq, []int{9, 9}) {
 		t.Errorf("bad serialization: %+v (%s)", ser, decodeString(ser.Data))
+	}
+
+	if cr.Len() != 9 {
+		t.Errorf("bad length: %v", cr.Len())
+	}
+}
+
+func TestMove(t *testing.T) {
+	cr := New[uint16, int]()
+
+	cr.PerformAppend(0, 100, encodeString("hello there"), 1)
+	withinDelete := cr.FindAt(6)
+
+	cr.PerformDelete(cr.FindAt(5), cr.FindAt(7))
+
+	if decodeString(cr.ReadAll().Data) != "hellhere" {
+		t.Errorf("bad string")
+	}
+
+	// move within deleted range; should NOT become deleted (right now at least)
+	cr.PerformMove(cr.FindAt(1), cr.FindAt(2), withinDelete)
+	if decodeString(cr.ReadAll().Data) != "llhehere" || cr.Len() != 8 {
+		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
 	}
 }

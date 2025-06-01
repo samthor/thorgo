@@ -287,6 +287,7 @@ func (s *serverImpl[Data, Meta]) PerformDelete(a, b int) (outA int, outB int, ok
 			s.r.DeleteTo(afterId, id)
 			s.r.InsertIdAfter(afterId, id, 0, rn.Data)
 			deletedIds = append(deletedIds, id)
+			s.len -= len(rn.Data.data)
 		}
 
 		if id == high {
@@ -319,6 +320,7 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (ok bool) {
 		return // invalid target
 	}
 	originalAfterId := afterId
+	// isDeleted := s.r.Info(originalAfterId).Data.del
 
 	ok1 := s.ensureEdge(low)
 	ok2 := s.ensureEdge(high)
@@ -330,6 +332,12 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (ok bool) {
 		if s.r.DeleteTo(low, id) != 1 {
 			panic("expected single delete")
 		}
+
+		// TODO: could restore to "delete if target deleted"
+		// if isDeleted && !rn.Data.del {
+		// 	rn.Data.del = true
+		// 	s.len -= len(rn.Data.data)
+		// }
 
 		if !s.r.InsertIdAfter(afterId, id, rn.Data.len(), rn.Data) {
 			panic("couldn't move node")

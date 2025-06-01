@@ -34,7 +34,7 @@ type ServerCr[Data any, Meta comparable] interface {
 	// PerformMove moves the given range to after another node.
 	// If the other node is within the range itself, this is a no-op.
 	// It has the same semantics as PerformDelete: point _at_ nodes, not before nodes.
-	// TODO: what if part of this is deleted?
+	// This does not change the deleted state of the moved nodes (even e.g., if moving undeleted after deleted).
 	PerformMove(a, b, after int) (ok bool)
 }
 
