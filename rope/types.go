@@ -40,7 +40,7 @@ type Rope[Id comparable, T any] interface {
 	Info(id Id) Info[Id, T]
 
 	// Finds the Id/info at the position in the Rope.
-	// Returns the offset from the end of the ID.
+	// Returns the offset from the end of the Id.
 	// This costs ~O(logn).
 	// Either stops before or skips after zero-length content based on biasAfter.
 	// e.g., with 0/false, this will aways return the zero Id.

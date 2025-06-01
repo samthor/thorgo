@@ -144,16 +144,16 @@ func TestRope(t *testing.T) {
 		}
 
 		// position
-		if id, offset := r.ByPosition(5, false); id != helloId || offset != 5 {
+		if id, offset := r.ByPosition(5, false); id != helloId || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
 		}
-		if id, offset := r.ByPosition(5, true); id != thereId || offset != 0 {
+		if id, offset := r.ByPosition(5, true); id != thereId || offset != 6 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, thereId, offset)
 		}
 		if id, offset := r.ByPosition(0, false); id != 0 || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, 0, offset)
 		}
-		if id, offset := r.ByPosition(0, true); id != helloId || offset != 0 {
+		if id, offset := r.ByPosition(0, true); id != helloId || offset != 5 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
 		}
 
