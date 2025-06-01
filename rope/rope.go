@@ -12,19 +12,26 @@ const (
 	maxHeight = 32
 )
 
-// New builds a new Rope[Id, T].
-func New[Id comparable, T any]() Rope[Id, T] {
+// NewRoot builds a new Rope[Id, T] with a given root value for the zero ID.
+func NewRoot[Id comparable, T any](root T) Rope[Id, T] {
 	out := &ropeImpl[Id, T]{
 		byId:     map[Id]*ropeNode[Id, T]{},
 		height:   1,
 		nodePool: make([]*ropeNode[Id, T], 0, poolSize),
 	}
+	out.head.dl.Data = root
 
 	var zeroId Id
 	out.byId[zeroId] = &out.head
 	out.head.levels = make([]ropeLevel[Id, T], 1, maxHeight) // never alloc again
 	out.head.levels[0] = ropeLevel[Id, T]{prev: &out.head}
 	return out
+}
+
+// New builds a new Rope[Id, T].
+func New[Id comparable, T any]() Rope[Id, T] {
+	var root T
+	return NewRoot[Id](root)
 }
 
 type ropeLevel[Id comparable, T any] struct {
@@ -172,10 +179,10 @@ func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
 }
 
 func (r *ropeImpl[Id, T]) ByPosition(position int, biasAfter bool) (id Id, offset int) {
-	if position < 0 || position > r.len {
-		offset = position
-		return
-	}
+	// if position < 0 || position > r.len {
+	// 	offset = position
+	// 	return
+	// }
 
 	e := &r.head
 outer:
@@ -198,7 +205,9 @@ outer:
 		}
 	}
 
-	return e.id, position
+	return e.id, e.dl.Len - position
+
+	// return e.levels[0].next.id, e.dl.Len - position
 }
 
 func (r *ropeImpl[Id, T]) InsertIdAfter(afterId, newId Id, length int, data T) bool {
