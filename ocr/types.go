@@ -35,7 +35,8 @@ type ServerCr[Data any, Meta comparable] interface {
 	// If the other node is within the range itself, this is a no-op.
 	// It has the same semantics as PerformDelete: point _at_ nodes, not before nodes.
 	// This does not change the deleted state of the moved nodes (even e.g., if moving undeleted after deleted).
-	PerformMove(a, b, after int) (ok bool)
+	// Returns the start/end of the non-deleted moved range, and the last non-deleted ID that this is after.
+	PerformMove(a, b, after int) (outA, outB, effectiveAfter int, ok bool)
 }
 
 type SerializedState[Data, Meta any] struct {

@@ -230,7 +230,7 @@ func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta 
 	if l == 0 {
 		return // has no length
 	}
-	if existsNode, _ := s.lookupNode(id); existsNode != nil {
+	if check, _ := s.idTree.After(&internalNode[Data, Meta]{id: id - len(data)}); check != nil && check.id <= id {
 		return // already exists
 	}
 	if !s.ensureEdge(after) {
@@ -286,7 +286,9 @@ func (s *serverImpl[Data, Meta]) PerformDelete(a, b int) (outA int, outB int, ok
 			rn.Data.del = true
 			s.r.DeleteTo(afterId, id)
 			s.r.InsertIdAfter(afterId, id, 0, rn.Data)
-			deletedIds = append(deletedIds, id)
+
+			deletedIds = append(deletedIds, id-len(rn.Data.data)+1, id) // store start-end of node (we take extent later)
+
 			s.len -= len(rn.Data.data)
 		}
 
@@ -302,16 +304,18 @@ func (s *serverImpl[Data, Meta]) PerformDelete(a, b int) (outA int, outB int, ok
 	return deletedIds[0], deletedIds[len(deletedIds)-1], true
 }
 
-func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (ok bool) {
+func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (outA, outB, effectiveAfter int, ok bool) {
 	low, high, ok := s.boundaryFor(a, b)
 	if !ok {
 		return
 	}
 
+	// do we have to do anything? (target may be within range)
 	if cmp, _ := s.Compare(afterId, low); cmp >= 0 {
 		if cmp, _ := s.Compare(afterId, high); cmp <= 0 {
-			// do nothing; target within range (or point to start: valid but no-op)
-			return true
+			// TODO: does this differentiate 'nothing happened' well enough?
+			ok = true
+			return
 		}
 	}
 
@@ -328,7 +332,20 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (ok bool) {
 		panic("can't ensureEdge for move")
 	}
 
+	// precalc what is the valid 'after' before us by cheating: find position biasing before delete, then calc ID from that
+	afterPos := s.r.Find(afterId)
+	if afterPos == -1 {
+		panic("could not find afterId previously edged")
+	}
+	positionId, positionOffset := s.r.ByPosition(afterPos, false)
+	effectiveAfter = positionId - positionOffset
+
+	var undeletedMoveIds []int
 	for id, rn := range s.r.Iter(low) {
+		if !rn.Data.del {
+			undeletedMoveIds = append(undeletedMoveIds, id-len(rn.Data.data)+1, id)
+		}
+
 		if s.r.DeleteTo(low, id) != 1 {
 			panic("expected single delete")
 		}
@@ -349,12 +366,18 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (ok bool) {
 		afterId = id
 	}
 
+	if len(undeletedMoveIds) != 0 {
+		outA = undeletedMoveIds[0]
+		outB = undeletedMoveIds[len(undeletedMoveIds)-1]
+	}
+
 	// check for sequential fixes:
 	s.maybeConsumeByAfter(low)             // where we removed
 	s.maybeConsumeByAfter(originalAfterId) // where we inserted
 	s.maybeConsumeByAfter(high)            // the end of the insert
 
-	return true
+	ok = true
+	return
 }
 
 // boundaryFor sorts the given target nodes and returns the edge before the lower one.

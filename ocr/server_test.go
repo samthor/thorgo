@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"log"
 	"reflect"
 	"testing"
 	"unicode/utf16"
@@ -12,6 +13,26 @@ func decodeString(raw []uint16) string {
 
 func encodeString(s string) []uint16 {
 	return utf16.Encode([]rune(s))
+}
+
+func TestAppendZero(t *testing.T) {
+	cr := New[uint16, int]()
+	var ok bool
+
+	_, ok = cr.PerformAppend(0, 2, encodeString("hello "), 1)
+	if ok {
+		t.Errorf("cannot insert 'over' zero id")
+	}
+
+	_, ok = cr.PerformAppend(0, 0, encodeString("hello "), 1)
+	if ok {
+		t.Errorf("cannot insert 'over' zero id")
+	}
+
+	_, ok = cr.PerformAppend(0, -1, encodeString("hello "), 1)
+	if !ok {
+		t.Errorf("can insert to -1")
+	}
 }
 
 func TestServerCr(t *testing.T) {
@@ -95,16 +116,33 @@ func TestMove(t *testing.T) {
 	cr := New[uint16, int]()
 
 	cr.PerformAppend(0, 100, encodeString("hello there"), 1)
-	withinDelete := cr.FindAt(6)
+	withinDelete := cr.FindAt(7) // technically "at end" of delete
 
-	cr.PerformDelete(cr.FindAt(5), cr.FindAt(7))
+	delA, delB := cr.FindAt(5), cr.FindAt(7)
+	cr.PerformDelete(delA, delB)
 
 	if decodeString(cr.ReadAll().Data) != "hellhere" {
 		t.Errorf("bad string")
 	}
 
 	// move within deleted range; should NOT become deleted (right now at least)
-	cr.PerformMove(cr.FindAt(1), cr.FindAt(2), withinDelete)
+	a, b := cr.FindAt(1), cr.FindAt(2)
+	log.Printf("searching for %d", withinDelete)
+	if outA, outB, effectiveAfter, _ := cr.PerformMove(a, b, withinDelete); outA != a || outB != b || effectiveAfter != 93 {
+		t.Errorf("move expected %d/%d was %d/%d after %d was %d", outA, outB, a, b, effectiveAfter, 93)
+	}
+	if decodeString(cr.ReadAll().Data) != "llhehere" || cr.Len() != 8 {
+		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
+	}
+
+	pos := cr.PositionFor(93)
+	if pos != 2 {
+		t.Errorf("bad pos")
+	}
+
+	if outA, outB, effectiveAfter, ok := cr.PerformMove(delA, delB, 0); !ok || effectiveAfter != 0 || outA != 0 || outB != 0 {
+		t.Errorf("del move should 'succeed' but be all zeros: was ok=%v %v/%v/%v", ok, outA, outB, effectiveAfter)
+	}
 	if decodeString(cr.ReadAll().Data) != "llhehere" || cr.Len() != 8 {
 		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
 	}
