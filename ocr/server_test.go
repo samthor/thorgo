@@ -124,6 +124,12 @@ func TestMove(t *testing.T) {
 	if decodeString(cr.ReadAll().Data) != "hellhere" {
 		t.Errorf("bad string")
 	}
+	if outId, ok := cr.ReconcileSeq(withinDelete); !ok || outId != 93 || withinDelete == 93 {
+		t.Errorf("bad reconcile, wanted id=93 was=%v", outId)
+	}
+	if pos, _ := cr.PositionFor(93); pos != 4 {
+		t.Errorf("bad position")
+	}
 
 	// move within deleted range; should NOT become deleted (right now at least)
 	a, b := cr.FindAt(1), cr.FindAt(2)
@@ -135,7 +141,7 @@ func TestMove(t *testing.T) {
 		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
 	}
 
-	pos := cr.PositionFor(93)
+	pos, _ := cr.PositionFor(93)
 	if pos != 2 {
 		t.Errorf("bad pos")
 	}
@@ -145,5 +151,9 @@ func TestMove(t *testing.T) {
 	}
 	if decodeString(cr.ReadAll().Data) != "llhehere" || cr.Len() != 8 {
 		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
+	}
+
+	if outId, ok := cr.ReconcileSeq(withinDelete); !ok || outId != 0 {
+		t.Errorf("bad reconcile, wanted id=0 was=%v", outId)
 	}
 }

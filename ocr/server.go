@@ -180,13 +180,21 @@ func (s *serverImpl[Data, Meta]) EndSeq() int {
 	return s.r.LastId()
 }
 
-func (s *serverImpl[Data, Meta]) PositionFor(id int) int {
+func (s *serverImpl[Data, Meta]) ReconcileSeq(id int) (outId int, ok bool) {
+	pos, ok := s.PositionFor(id)
+	if !ok {
+		return
+	}
+	return s.FindAt(pos), true
+}
+
+func (s *serverImpl[Data, Meta]) PositionFor(id int) (pos int, ok bool) {
 	node, offset := s.lookupNode(id)
 	if node == nil {
-		return -1
+		return -1, false
 	}
 	nodePosition := s.r.Find(node.id)
-	return nodePosition - offset
+	return nodePosition - offset, true
 }
 
 func (s *serverImpl[Data, Meta]) FindAt(at int) int {

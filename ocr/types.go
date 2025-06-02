@@ -12,10 +12,14 @@ type ServerCr[Data any, Meta comparable] interface {
 	// Use this as part of Read to read all data.
 	EndSeq() int
 
+	// ReconcileSeq returns the closest undeleted ID for the given ID.
+	ReconcileSeq(id int) (outId int, ok bool)
+
 	// PositionFor returns the position for the given ID.
-	PositionFor(id int) int
+	PositionFor(id int) (position int, ok bool)
 
 	// FindAt returns the ID for the given position in the data.
+	// This always returns a valid ID as it is clamped by the length.
 	FindAt(at int) int
 
 	// Compare compares the position of the two IDs.

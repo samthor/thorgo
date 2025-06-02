@@ -179,10 +179,11 @@ func (r *ropeImpl[Id, T]) Info(id Id) (out Info[Id, T]) {
 }
 
 func (r *ropeImpl[Id, T]) ByPosition(position int, biasAfter bool) (id Id, offset int) {
-	// if position < 0 || position > r.len {
-	// 	offset = position
-	// 	return
-	// }
+	if position <= 0 {
+		return
+	} else if position >= r.len {
+		return r.lastId, 0
+	}
 
 	e := &r.head
 outer:
