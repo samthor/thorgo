@@ -318,12 +318,13 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (outA, outB,
 		return
 	}
 
-	// do we have to do anything? (target may be within range)
+	var noopMove bool
+
 	if cmp, _ := s.Compare(afterId, low); cmp >= 0 {
 		if cmp, _ := s.Compare(afterId, high); cmp <= 0 {
-			// TODO: does this differentiate 'nothing happened' well enough?
-			ok = true
-			return
+			// we still do this move even though it's a no-op: helps with deleted out and 'user selects self'
+			afterId = low
+			noopMove = true
 		}
 	}
 
@@ -354,18 +355,20 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (outA, outB,
 			undeletedMoveIds = append(undeletedMoveIds, id-len(rn.Data.data)+1, id)
 		}
 
-		if s.r.DeleteTo(low, id) != 1 {
-			panic("expected single delete")
-		}
+		if !noopMove {
+			if s.r.DeleteTo(low, id) != 1 {
+				panic("expected single delete")
+			}
 
-		// TODO: could restore to "delete if target deleted"
-		// if isDeleted && !rn.Data.del {
-		// 	rn.Data.del = true
-		// 	s.len -= len(rn.Data.data)
-		// }
+			// TODO: could restore to "delete if target deleted"
+			// if isDeleted && !rn.Data.del {
+			// 	rn.Data.del = true
+			// 	s.len -= len(rn.Data.data)
+			// }
 
-		if !s.r.InsertIdAfter(afterId, id, rn.Data.len(), rn.Data) {
-			panic("couldn't move node")
+			if !s.r.InsertIdAfter(afterId, id, rn.Data.len(), rn.Data) {
+				panic("couldn't move node")
+			}
 		}
 
 		if id == high {

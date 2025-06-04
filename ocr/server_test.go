@@ -71,7 +71,13 @@ func TestServerCr(t *testing.T) {
 	}
 
 	// move but within
-	cr.PerformMove(cr.FindAt(1), cr.FindAt(10), cr.FindAt(5))
+	a, b, after := cr.FindAt(1), cr.FindAt(10), cr.FindAt(5)
+	if outA, outB, effectiveAfter, ok := cr.PerformMove(b, a, after); !ok || outA != a || outB != b || effectiveAfter != cr.FindAt(0) {
+		t.Errorf("bad noop move")
+	}
+	if outA, outB, effectiveAfter, ok := cr.PerformMove(a, b, after); !ok || outA != a || outB != b || effectiveAfter != cr.FindAt(0) {
+		t.Errorf("bad noop move")
+	}
 	if ser := cr.ReadAll(); decodeString(ser.Data) != "hellothere" {
 		t.Errorf("bad serialization: %+v (%s)", ser, decodeString(ser.Data))
 	}
