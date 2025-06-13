@@ -393,7 +393,12 @@ func (s *serverImpl[Data, Meta]) PerformMove(a, b int, afterId int) (outA, outB,
 
 // boundaryFor sorts the given target nodes and returns the edge before the lower one.
 func (s *serverImpl[Data, Meta]) boundaryFor(a, b int) (low, high int, ok bool) {
-	if cmp, _ := s.Compare(a, b); cmp > 0 {
+	var cmp int
+	cmp, ok = s.Compare(a, b)
+	if !ok {
+		return
+	}
+	if cmp > 0 {
 		a, b = b, a
 	}
 
