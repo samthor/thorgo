@@ -18,10 +18,7 @@ func CallServer(tr Transport, handle func(Transport) error) error {
 	key := -1
 	lastKeySent := -1
 
-	sendLock.Lock()
 	for {
-		sendLock.Unlock()
-
 		var data json.RawMessage
 		err := tr.Read(&data)
 		if err != nil {
@@ -35,66 +32,69 @@ func CallServer(tr Transport, handle func(Transport) error) error {
 			continue
 		}
 
-		sendLock.Lock()
-		active := conns[key]
-		if active != nil {
-			if stop {
-				active.cancel(fmt.Errorf("client: %s", cause))
-				delete(conns, key)
-			} else {
-				active.q.Push(data)
-			}
-			continue
-		} else if stop {
-			continue // stop for non-existent id
-		}
+		func() {
+			sendLock.Lock()
+			defer sendLock.Unlock()
 
-		// setup new call
-		localKey := key
-		ctx, cancel := context.WithCancelCause(tr.Context())
-		active = &activeConn{
-			ctx:    ctx,
-			cancel: cancel,
-			q:      queue.New[json.RawMessage](),
-			send: func(v json.RawMessage) {
-				select {
-				case <-ctx.Done():
-					return
-				default:
+			active := conns[key]
+			if active != nil {
+				if stop {
+					active.cancel(fmt.Errorf("client: %s", cause))
+					delete(conns, key)
+				} else {
+					active.q.Push(data)
+				}
+				return
+			} else if stop {
+				return
+			}
+
+			// setup new call
+			localKey := key
+			ctx, cancel := context.WithCancelCause(tr.Context())
+			active = &activeConn{
+				ctx:    ctx,
+				cancel: cancel,
+				q:      queue.New[json.RawMessage](),
+				send: func(v json.RawMessage) {
+					select {
+					case <-ctx.Done():
+						return
+					default:
+					}
+
+					sendLock.Lock()
+					defer sendLock.Unlock()
+
+					if lastKeySent != localKey {
+						lastKeySent = localKey
+						tr.Send([]any{localKey, v})
+					} else {
+						tr.Send(v)
+					}
+				},
+			}
+			active.listener = active.q.Join(ctx)
+			conns[key] = active
+			active.q.Push(data)
+
+			go func() {
+				err := handle(active)
+
+				// send before cancel
+				if err != nil {
+					s := err.Error()
+					msg, _ := json.Marshal(s)
+					active.send(msg)
+				} else {
+					active.send([]byte("true"))
 				}
 
 				sendLock.Lock()
 				defer sendLock.Unlock()
-
-				if lastKeySent != localKey {
-					lastKeySent = localKey
-					tr.Send([]any{localKey, v})
-				} else {
-					tr.Send(v)
-				}
-			},
-		}
-		active.listener = active.q.Join(ctx)
-		conns[key] = active
-		active.q.Push(data)
-
-		go func() {
-			err := handle(active)
-
-			// send before cancel
-			if err != nil {
-				s := err.Error()
-				msg, _ := json.Marshal(s)
-				active.send(msg)
-			} else {
-				active.send([]byte("true"))
-			}
-
-			sendLock.Lock()
-			delete(conns, key)
-			sendLock.Unlock()
-
-			cancel(err)
+				delete(conns, key)
+				cancel(err)
+			}()
 		}()
 	}
 }
