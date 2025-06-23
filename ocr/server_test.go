@@ -1,7 +1,6 @@
 package ocr
 
 import (
-	"log"
 	"reflect"
 	"testing"
 	"unicode/utf16"
@@ -30,8 +29,8 @@ func TestAppendZero(t *testing.T) {
 	}
 
 	_, ok = cr.PerformAppend(0, -1, encodeString("hello "), 1)
-	if !ok {
-		t.Errorf("can insert to -1")
+	if ok {
+		t.Errorf("canot insert -ve data")
 	}
 }
 
@@ -139,7 +138,6 @@ func TestMove(t *testing.T) {
 
 	// move within deleted range; should NOT become deleted (right now at least)
 	a, b := cr.FindAt(1), cr.FindAt(2)
-	log.Printf("searching for %d", withinDelete)
 	if outA, outB, effectiveAfter, _ := cr.PerformMove(a, b, withinDelete); outA != a || outB != b || effectiveAfter != 93 {
 		t.Errorf("move expected %d/%d was %d/%d after %d was %d", outA, outB, a, b, effectiveAfter, 93)
 	}
@@ -161,5 +159,103 @@ func TestMove(t *testing.T) {
 
 	if outId, ok := cr.ReconcileSeq(withinDelete); !ok || outId != 0 {
 		t.Errorf("bad reconcile, wanted id=0 was=%v", outId)
+	}
+}
+
+func TestDelete(t *testing.T) {
+	cr := New[uint16, int]()
+
+	cr.PerformAppend(0, 100, encodeString("hello "), 1)
+	cr.PerformAppend(100, 120, encodeString("there"), 2)
+	if _, _, ok := cr.PerformDelete(119, 99); !ok {
+		t.Errorf("bad thingo: %v", ok)
+	}
+
+	if decodeString(cr.ReadAll().Data) != "helle" || cr.Len() != 5 {
+		t.Errorf("bad string: %v (len=%v)", decodeString(cr.ReadAll().Data), cr.Len())
+	}
+
+	dels := cr.ReadDel(nil)
+	if len(dels) != 2 {
+		t.Errorf("bad dels")
+	}
+
+	meta := 1
+	dels = cr.ReadDel(&meta)
+	if !reflect.DeepEqual(dels, []SerializedStateDel[uint16, int]{
+		{
+			Data:  encodeString("o "),
+			Meta:  1,
+			Id:    100,
+			After: 98,
+		},
+	}) {
+		t.Errorf("dels wrong: %+v", dels)
+	}
+
+	meta = 2
+	dels = cr.ReadDel(&meta)
+	if !reflect.DeepEqual(dels, []SerializedStateDel[uint16, int]{
+		{
+			Data:  encodeString("ther"),
+			Meta:  2,
+			Id:    119,
+			After: 100,
+		},
+	}) {
+		t.Errorf("dels wrong: %+v", dels)
+	}
+}
+
+func TestAppendDup(t *testing.T) {
+	cr := New[uint16, int]()
+
+	_, ok1 := cr.PerformAppend(0, 100, encodeString("hello"), 1)
+	_, ok2 := cr.PerformAppend(0, 100, encodeString("llo"), 1)
+	_, ok3 := cr.PerformAppend(0, 97, encodeString("he"), 1)
+	if !ok1 || !ok2 || !ok3 {
+		t.Errorf("should allow dup appends: %v %v %v", ok1, ok2, ok3)
+	}
+
+	if _, ok := cr.PerformAppend(0, 95, encodeString("xx"), 1); !ok {
+		t.Errorf("should allow immedate before append")
+	}
+
+	if hidden, ok := cr.PerformAppend(0, 97, encodeString("xxhe"), 1); !ok || !hidden {
+		t.Errorf("unexpected state: should allow but be hidden")
+	}
+
+	if _, ok := cr.PerformAppend(0, 97, encodeString("xxHe"), 1); ok {
+		t.Errorf("data not same, should not allow append")
+	}
+
+	if decodeString(cr.ReadAll().Data) != "xxhello" {
+		t.Errorf("bad data")
+	}
+
+	if _, ok := cr.PerformAppend(95, 600, encodeString("yy"), 2); !ok {
+		t.Errorf("couldn't insert")
+	}
+	if decodeString(cr.ReadAll().Data) != "xxyyhello" {
+		t.Errorf("bad data")
+	}
+
+	// this must pass; even though we have put "yy" in the middle, the source data 93-97 is "xxhe"
+	if hidden, ok := cr.PerformAppend(0, 97, encodeString("xxhe"), 1); !ok || !hidden {
+		t.Errorf("unexpected state: should allow but be hidden")
+	}
+	if hidden, ok := cr.PerformAppend(0, 96, encodeString("xh"), 1); !ok || !hidden {
+		t.Errorf("unexpected state: should allow but be hidden")
+	}
+	if hidden, ok := cr.PerformAppend(0, 599, encodeString("y"), 1); !ok || !hidden {
+		t.Errorf("unexpected state: should allow but be hidden")
+	}
+
+	if _, ok := cr.PerformAppend(0, 600, encodeString("yyy"), 1); ok {
+		t.Errorf("should fail, data wrong")
+	}
+
+	if _, ok := cr.PerformAppend(1221512, 97, encodeString("xxhe"), 1); ok {
+		t.Errorf("after ID is invalid; should not pass")
 	}
 }

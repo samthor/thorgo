@@ -1,11 +1,13 @@
 package ocr
 
 import (
+	"slices"
+
 	"github.com/samthor/thorgo/aatree"
 	"github.com/samthor/thorgo/rope"
 )
 
-func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
+func New[Data, Meta comparable]() ServerCr[Data, Meta] {
 	rootNode := &internalNode[Data, Meta]{}
 	r := rope.NewRoot[int](rootNode)
 	idTree := aatree.New(func(a, b *internalNode[Data, Meta]) int { return a.id - b.id })
@@ -17,11 +19,15 @@ func New[Data any, Meta comparable]() ServerCr[Data, Meta] {
 	}
 }
 
-type internalNode[Data any, Meta comparable] struct {
+type internalNode[Data, Meta comparable] struct {
 	id   int    // high id
 	data []Data // data here (can only be nil at root)
 	meta Meta
 	del  bool
+}
+
+func (in *internalNode[Data, Meta]) low() int {
+	return in.id - len(in.data)
 }
 
 func (in *internalNode[Data, Meta]) len() int {
@@ -31,7 +37,7 @@ func (in *internalNode[Data, Meta]) len() int {
 	return len(in.data)
 }
 
-type serverImpl[Data any, Meta comparable] struct {
+type serverImpl[Data, Meta comparable] struct {
 	len    int
 	r      rope.Rope[int, *internalNode[Data, Meta]]
 	idTree *aatree.AATree[*internalNode[Data, Meta]]
@@ -167,13 +173,40 @@ func (s *serverImpl[Data, Meta]) ReadAll() *SerializedState[Data, Meta] {
 
 		out.Data = append(out.Data, node.Data.data...)
 
+		if len(out.Seq) != 0 && id == lastId+len(node.Data.data) && out.Meta[len(out.Meta)-1] == node.Data.meta {
+			// TODO: merge together
+		}
+
 		delta := id - lastId
 		out.Seq = append(out.Seq, len(node.Data.data), delta)
 		out.Meta = append(out.Meta, node.Data.meta)
 		lastId = id
 	}
 	return &out
+}
 
+func (s *serverImpl[Data, Meta]) ReadDel(filter *Meta) []SerializedStateDel[Data, Meta] {
+	out := make([]SerializedStateDel[Data, Meta], 0)
+
+	var lastAfter int
+
+	for id, node := range s.r.Iter(0) {
+		if !node.Data.del || (filter != nil && node.Data.meta != *filter) {
+			lastAfter = id
+			continue
+		}
+
+		out = append(out, SerializedStateDel[Data, Meta]{
+			Data:  node.Data.data,
+			Meta:  node.Data.meta,
+			Id:    id,
+			After: lastAfter,
+		})
+
+		lastAfter = id
+	}
+
+	return out
 }
 
 func (s *serverImpl[Data, Meta]) EndSeq() int {
@@ -233,13 +266,59 @@ func (s *serverImpl[Data, Meta]) LeftOf(id int) int {
 	return s.r.Info(node.id).Prev
 }
 
-func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta Meta) (deleted, ok bool) {
+func (s *serverImpl[Data, Meta]) readSourceRange(id, length int) (out []Data, ok bool) {
+	low := id - length
+	high := id
+
+	lowNode, _ := s.idTree.EqualAfter(&internalNode[Data, Meta]{id: low})
+	if lowNode == nil || lowNode.low() > low {
+		return
+	}
+	lowOffset := len(lowNode.data) - (lowNode.id - low)
+
+	highNode, _ := s.idTree.EqualAfter(&internalNode[Data, Meta]{id: high})
+	if highNode == nil || highNode.low() > high {
+		return
+	}
+	highOffset := highNode.id - high
+
+	startAt := s.r.Info(lowNode.id).Prev
+	allData := make([]Data, 0)
+
+	expectNextLow := lowNode.low()
+
+	for id, data := range s.r.Iter(startAt) {
+		if expectNextLow == data.Data.low() {
+			allData = append(allData, data.Data.data...)
+			expectNextLow = id
+		}
+		if id == highNode.id {
+			break
+		}
+	}
+
+	return allData[lowOffset : len(allData)-highOffset], true
+}
+
+func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta Meta) (hidden, ok bool) {
 	l := len(data)
 	if l == 0 {
 		return // has no length
 	}
-	if check, _ := s.idTree.After(&internalNode[Data, Meta]{id: id - len(data)}); check != nil && check.id <= id {
-		return // already exists
+	if id-len(data) < 0 {
+		return // cannot insert -ve
+	}
+
+	if check, _ := s.idTree.After(&internalNode[Data, Meta]{id: id - len(data)}); check != nil && check.id-len(check.data) < id {
+		// already exists; check if it's _exactly_ the same
+		compare, _ := s.readSourceRange(id, len(data))
+		if slices.Equal(data, compare) {
+			nearest, _ := s.lookupNode(after)
+			if nearest != nil {
+				return true, true
+			}
+		}
+		return
 	}
 	if !s.ensureEdge(after) {
 		return // cannot create edge here

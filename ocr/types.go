@@ -7,6 +7,9 @@ type ServerCr[Data any, Meta comparable] interface {
 	// This will not include deleted nodes.
 	ReadAll() *SerializedState[Data, Meta]
 
+	// ReadDel reads all the deleted data here, optionally filtered to a give Meta.
+	ReadDel(filter *Meta) []SerializedStateDel[Data, Meta]
+
 	// EndSeq returns the node ID at the end of this data.
 	// This may be a deleted ID and not normally visible.
 	// Use this as part of Read to read all data.
@@ -27,7 +30,9 @@ type ServerCr[Data any, Meta comparable] interface {
 
 	// PerformAppend inserts data after the prior node.
 	// Specify its ID, which is the tail of the data, and all data in the sequence must have a unique ID.
-	PerformAppend(after, id int, data []Data, meta Meta) (deleted, ok bool)
+	// It is safe to append data which already exists and matches here (but it is otherwise immutable), however the Meta is not updated.
+	// The change is hidden if it is deleted or a duplicate append.
+	PerformAppend(after, id int, data []Data, meta Meta) (hidden, ok bool)
 
 	// PerformDelete marks the given range as deleted.
 	// Both arguments point directly to nodes, so it is valid for both values to be equal (and deletion of "one" will occur).
@@ -44,7 +49,14 @@ type ServerCr[Data any, Meta comparable] interface {
 }
 
 type SerializedState[Data, Meta any] struct {
-	Data []Data `json:"data"` // underlying data in run stuck together
-	Seq  []int  `json:"seq"`  // pairs of [length,seqDelta]
-	Meta []Meta `json:"-"`    // meta of data, always half of Seq
+	Data []Data // underlying data in run stuck together
+	Seq  []int  // pairs of [length,seqDelta]
+	Meta []Meta // meta of data, always half of Seq
+}
+
+type SerializedStateDel[Data, Meta any] struct {
+	Data  []Data
+	Meta  Meta
+	Id    int
+	After int
 }
