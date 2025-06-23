@@ -259,3 +259,26 @@ func TestAppendDup(t *testing.T) {
 		t.Errorf("after ID is invalid; should not pass")
 	}
 }
+
+func TestAppendDupMove(t *testing.T) {
+	cr := New[uint16, int]()
+
+	cr.PerformAppend(0, 100, encodeString("hello"), 1)
+	if hidden, ok := cr.PerformAppend(0, 100, encodeString("hello"), 1); !ok || !hidden {
+		t.Errorf("bad, should succeed")
+	}
+
+	cr.PerformMove(98, 99, 100)
+	if decodeString(cr.ReadAll().Data) != "heoll" {
+		t.Errorf("bad data")
+	}
+
+	if hidden, ok := cr.PerformAppend(0, 100, encodeString("hello"), 1); !ok || !hidden {
+		t.Errorf("bad, should succeed")
+	}
+
+	if hidden, ok := cr.PerformAppend(0, 99, encodeString("ell"), 1); !ok || !hidden {
+		t.Errorf("bad, should succeed")
+	}
+
+}

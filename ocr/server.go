@@ -37,6 +37,17 @@ func (in *internalNode[Data, Meta]) len() int {
 	return len(in.data)
 }
 
+func (in *internalNode[Data, Meta]) readFrom(low int) []Data {
+	nodeLow := in.id - len(in.data)
+
+	if low < nodeLow || low >= in.id {
+		return nil
+	}
+
+	offset := low - nodeLow
+	return in.data[offset:]
+}
+
 type serverImpl[Data, Meta comparable] struct {
 	len    int
 	r      rope.Rope[int, *internalNode[Data, Meta]]
@@ -266,38 +277,31 @@ func (s *serverImpl[Data, Meta]) LeftOf(id int) int {
 	return s.r.Info(node.id).Prev
 }
 
-func (s *serverImpl[Data, Meta]) readSourceRange(id, length int) (out []Data, ok bool) {
+func (s *serverImpl[Data, Meta]) readSourceRange(id, length int) ([]Data, bool) {
 	low := id - length
 	high := id
 
-	lowNode, _ := s.idTree.EqualAfter(&internalNode[Data, Meta]{id: low})
-	if lowNode == nil || lowNode.low() > low {
-		return
-	}
-	lowOffset := len(lowNode.data) - (lowNode.id - low)
+	out := make([]Data, 0, length)
 
-	highNode, _ := s.idTree.EqualAfter(&internalNode[Data, Meta]{id: high})
-	if highNode == nil || highNode.low() > high {
-		return
-	}
-	highOffset := highNode.id - high
-
-	startAt := s.r.Info(lowNode.id).Prev
-	allData := make([]Data, 0)
-
-	expectNextLow := lowNode.low()
-
-	for id, data := range s.r.Iter(startAt) {
-		if expectNextLow == data.Data.low() {
-			allData = append(allData, data.Data.data...)
-			expectNextLow = id
+	for low < high {
+		node, _ := s.idTree.After(&internalNode[Data, Meta]{id: low})
+		if node == nil {
+			return nil, false
 		}
-		if id == highNode.id {
-			break
+
+		part := node.readFrom(low)
+		if len(part) == 0 {
+			return nil, false
 		}
+
+		out = append(out, part...)
+		low += len(part)
 	}
 
-	return allData[lowOffset : len(allData)-highOffset], true
+	if len(out) < length {
+		return nil, false
+	}
+	return out[:length], true
 }
 
 func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta Meta) (hidden, ok bool) {
