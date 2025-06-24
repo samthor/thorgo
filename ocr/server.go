@@ -350,7 +350,10 @@ func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta 
 
 	s.idTree.Insert(node)
 	s.r.InsertIdAfter(after, id, node.len(), node)
-	s.len += l
+
+	if !node.del {
+		s.len += l
+	}
 
 	s.maybeConsumeByAfter(id) // possible but unlikely that we insert sequentially before another
 

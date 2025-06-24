@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"log"
 	"reflect"
 	"testing"
 	"unicode/utf16"
@@ -289,4 +290,35 @@ func TestSerialize(t *testing.T) {
 	if out.Data == nil || out.Seq == nil || out.Meta == nil {
 		t.Error("should not have any nil values")
 	}
+}
+
+func TestLen(t *testing.T) {
+	cr := New[uint16, int]()
+
+	cr.PerformAppend(0, 100, encodeString("hello"), 1)
+	if cr.Len() != 5 {
+		t.Error("should be two len")
+	}
+
+	cr.PerformDelete(97, 100)
+	if cr.Len() != 1 {
+		t.Errorf("should be one len, is: %v", cr.Len())
+	}
+
+	// doesn't add, insert in del section
+	cr.PerformAppend(98, 200, encodeString("disappeared"), 2)
+	if cr.Len() != 1 {
+		t.Error("should be one len")
+	}
+}
+
+func TestDeleteAll(t *testing.T) {
+	cr := New[uint16, int]()
+	cr.PerformAppend(0, 100, encodeString("hello"), 1)
+
+	zero := cr.FindAt(0)
+	low := cr.FindAt(1)
+	high := cr.FindAt(cr.Len())
+
+	log.Printf("zero=%v low=%v high=%v", zero, low, high)
 }
