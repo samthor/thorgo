@@ -277,11 +277,21 @@ func (s *serverImpl[Data, Meta]) LeftOf(id int) int {
 	return s.r.Info(node.id).Prev
 }
 
-func (s *serverImpl[Data, Meta]) readSourceRange(id, length int) ([]Data, bool) {
+func (s *serverImpl[Data, Meta]) ReadSource(id, length int) (out []Data, ok bool) {
+	out = make([]Data, 0, length)
+
+	if length < 0 {
+		return nil, false
+	} else if length == 0 {
+		node, _ := s.lookupNode(id)
+		if node == nil {
+			return nil, false
+		}
+		return out, true
+	}
+
 	low := id - length
 	high := id
-
-	out := make([]Data, 0, length)
 
 	for low < high {
 		node, _ := s.idTree.After(&internalNode[Data, Meta]{id: low})
@@ -315,7 +325,7 @@ func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta 
 
 	if check, _ := s.idTree.After(&internalNode[Data, Meta]{id: id - len(data)}); check != nil && check.id-len(check.data) < id {
 		// already exists; check if it's _exactly_ the same
-		compare, _ := s.readSourceRange(id, len(data))
+		compare, _ := s.ReadSource(id, len(data))
 		if slices.Equal(data, compare) {
 			nearest, _ := s.lookupNode(after)
 			if nearest != nil {

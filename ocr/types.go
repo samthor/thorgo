@@ -1,6 +1,7 @@
 package ocr
 
 type ServerCr[Data any, Meta comparable] interface {
+	// Len returns the length of the undeleted data here.
 	Len() int
 
 	// Read flattens this state for use by end users.
@@ -9,6 +10,10 @@ type ServerCr[Data any, Meta comparable] interface {
 
 	// ReadDel reads all the deleted data here, optionally filtered to a give Meta.
 	ReadDel(filter *Meta) []SerializedStateDel[Data, Meta]
+
+	// ReadSource reads the source data behind the given ID, with the given length.
+	// This will include deleted data.
+	ReadSource(id, length int) (out []Data, ok bool)
 
 	// EndSeq returns the node ID at the end of this data.
 	// This may be a deleted ID and not normally visible.
