@@ -280,5 +280,13 @@ func TestAppendDupMove(t *testing.T) {
 	if hidden, ok := cr.PerformAppend(0, 99, encodeString("ell"), 1); !ok || !hidden {
 		t.Errorf("bad, should succeed")
 	}
+}
 
+func TestSerialize(t *testing.T) {
+	cr := New[uint16, int]()
+
+	out := cr.ReadAll()
+	if out.Data == nil || out.Seq == nil || out.Meta == nil {
+		t.Error("should not have any nil values")
+	}
 }

@@ -26,10 +26,6 @@ type internalNode[Data, Meta comparable] struct {
 	del  bool
 }
 
-func (in *internalNode[Data, Meta]) low() int {
-	return in.id - len(in.data)
-}
-
 func (in *internalNode[Data, Meta]) len() int {
 	if in.del {
 		return 0
@@ -173,7 +169,11 @@ func (s *serverImpl[Data, Meta]) Len() int {
 
 func (s *serverImpl[Data, Meta]) ReadAll() *SerializedState[Data, Meta] {
 	var out SerializedState[Data, Meta]
+
+	// ensure both are non-nil
 	out.Data = make([]Data, 0, s.len)
+	out.Seq = make([]int, 0, s.len*2)
+	out.Meta = make([]Meta, 0, s.len)
 
 	var lastId int
 
