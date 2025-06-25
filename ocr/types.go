@@ -15,6 +15,10 @@ type ServerCr[Data any, Meta comparable] interface {
 	// This will include deleted data.
 	ReadSource(id, length int) (out []Data, ok bool)
 
+	// RestoreTo restores al the given source data rooted at zero.
+	// This deletes all other data and ensures that this source data is in-order.
+	RestoreTo(id, length int) (change, ok bool)
+
 	// EndSeq returns the node ID at the end of this data.
 	// This may be a deleted ID and not normally visible.
 	// Use this as part of Read to read all data.
@@ -44,6 +48,9 @@ type ServerCr[Data any, Meta comparable] interface {
 	// Returns the newly deleted range, which may be less than given (deleting within already deleted).
 	// If there's no newly deleted range, the range is [0,0], but this can still be 'ok'.
 	PerformDelete(a, b int) (outA, outB int, ok bool)
+
+	// PerformRestore is the opposite of PerformDelete.
+	PerformRestore(a, b int) (outA, outB int, ok bool)
 
 	// PerformMove moves the given range to after another node.
 	// If the other node is within the range itself, this is a no-op.

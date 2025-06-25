@@ -1,6 +1,7 @@
 package ocr
 
 import (
+	"log"
 	"slices"
 
 	"github.com/samthor/thorgo/aatree"
@@ -277,17 +278,13 @@ func (s *serverImpl[Data, Meta]) LeftOf(id int) int {
 	return s.r.Info(node.id).Prev
 }
 
-func (s *serverImpl[Data, Meta]) ReadSource(id, length int) (out []Data, ok bool) {
-	out = make([]Data, 0, length)
+func (s *serverImpl[Data, Meta]) readSourceInternal(id, length int) (out [][]Data, totalLength int, ok bool) {
+	out = make([][]Data, 0, length)
 
 	if length < 0 {
-		return nil, false
+		return
 	} else if length == 0 {
-		node, _ := s.lookupNode(id)
-		if node == nil {
-			return nil, false
-		}
-		return out, true
+		return [][]Data{}, 0, true
 	}
 
 	low := id - length
@@ -296,22 +293,107 @@ func (s *serverImpl[Data, Meta]) ReadSource(id, length int) (out []Data, ok bool
 	for low < high {
 		node, _ := s.idTree.After(&internalNode[Data, Meta]{id: low})
 		if node == nil {
-			return nil, false
+			return
 		}
 
 		part := node.readFrom(low)
 		if len(part) == 0 {
-			return nil, false
+			return
 		}
 
-		out = append(out, part...)
 		low += len(part)
+		if low > high {
+			part = part[0 : len(part)-(low-high)]
+		}
+
+		totalLength += len(part)
+		out = append(out, part)
 	}
 
-	if len(out) < length {
+	if totalLength != length {
+		return
+	}
+	return out, totalLength, true
+}
+
+func (s *serverImpl[Data, Meta]) ReadSource(id, length int) (out []Data, ok bool) {
+	parts, totalLength, ok := s.readSourceInternal(id, length)
+	if !ok {
 		return nil, false
 	}
-	return out[:length], true
+
+	out = make([]Data, 0, totalLength)
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out, true
+}
+
+func (s *serverImpl[Data, Meta]) RestoreTo(id, length int) (change, ok bool) {
+	parts, _, ok := s.readSourceInternal(id, length)
+	if !ok {
+		log.Printf("couldn't read id/le id=%v len=%v", id, length)
+		return
+	}
+
+	if s.len != 0 {
+		s.PerformDelete(s.FindAt(1), s.FindAt(s.len))
+		change = true
+	}
+	if length == 0 {
+		return change, true
+	}
+
+	curr := id - length
+	targetAfter := 0
+
+	for _, p := range parts {
+		s.PerformMove(curr+1, curr+len(p), targetAfter)
+		s.PerformRestore(curr+1, curr+len(p))
+
+		targetAfter = curr + len(p)
+		curr = targetAfter
+	}
+
+	return true, true
+}
+
+func (s *serverImpl[Data, Meta]) PerformRestore(a, b int) (outA, outB int, ok bool) {
+	low, high, ok := s.boundaryFor(a, b)
+	if !ok {
+		return
+	}
+
+	ok1 := s.ensureEdge(low)
+	ok2 := s.ensureEdge(high)
+	if !ok1 || !ok2 {
+		panic("can't ensureEdge for restore")
+	}
+
+	var restoredIds []int
+	afterId := low
+
+	for id, rn := range s.r.Iter(low) {
+		if rn.Data.del {
+			rn.Data.del = false
+			s.r.DeleteTo(afterId, id)
+			s.r.InsertIdAfter(afterId, id, len(rn.Data.data), rn.Data)
+
+			restoredIds = append(restoredIds, id-len(rn.Data.data)+1, id) // store start-end of node (we take extent later)
+
+			s.len += len(rn.Data.data)
+		}
+
+		if id == high {
+			break // boundaryFor prevents us from getting 'zero range'
+		}
+		afterId = id
+	}
+
+	if len(restoredIds) == 0 {
+		return 0, 0, true
+	}
+	return restoredIds[0], restoredIds[len(restoredIds)-1], true
 }
 
 func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta Meta) (hidden, ok bool) {

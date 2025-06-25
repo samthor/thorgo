@@ -322,3 +322,53 @@ func TestDeleteAll(t *testing.T) {
 
 	log.Printf("zero=%v low=%v high=%v", zero, low, high)
 }
+
+func TestAppendRestore(t *testing.T) {
+	cr := New[uint16, int]()
+	cr.PerformAppend(0, 100, encodeString("hello"), 1)
+
+	cr.PerformDelete(99, 100)
+
+	cr.PerformRestore(99, 99)
+
+	if decodeString(cr.ReadAll().Data) != "hell" {
+		t.Errorf("should restore string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+}
+
+func TestRestoreTo(t *testing.T) {
+	cr := New[uint16, int]()
+
+	cr.PerformAppend(0, 100, encodeString("hello"), 1)
+	cr.PerformMove(96, 97, 100)
+	if decodeString(cr.ReadAll().Data) != "llohe" {
+		t.Errorf("should move string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+
+	cr.PerformAppend(99, 200, encodeString("!!!"), 1)
+	if decodeString(cr.ReadAll().Data) != "ll!!!ohe" {
+		t.Errorf("should add string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+
+	if out, _ := cr.ReadSource(100, 5); decodeString(out) != "hello" {
+		t.Errorf("couldn't ReadSource")
+	}
+
+	change, ok := cr.RestoreTo(100, 5)
+	if !change || !ok {
+		t.Errorf("change=%v ok=%v", change, ok)
+	}
+	if decodeString(cr.ReadAll().Data) != "hello" {
+		t.Errorf("should restoreTo string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+
+	cr.RestoreTo(100, 2)
+	if decodeString(cr.ReadAll().Data) != "lo" {
+		t.Errorf("should restoreTo string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+	cr.RestoreTo(98, 2)
+
+	if decodeString(cr.ReadAll().Data) != "el" {
+		t.Errorf("should restoreTo string, was: %v", decodeString(cr.ReadAll().Data))
+	}
+}
