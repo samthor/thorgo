@@ -399,7 +399,7 @@ func (s *serverImpl[Data, Meta]) PerformRestore(a, b int) (outA, outB int, ok bo
 func (s *serverImpl[Data, Meta]) PerformAppend(after, id int, data []Data, meta Meta) (hidden, ok bool) {
 	l := len(data)
 	if l == 0 {
-		return // has no length
+		return true, true // has no length
 	}
 	if id-len(data) < 0 {
 		return // cannot insert -ve

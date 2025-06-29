@@ -4,9 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math/rand/v2"
 	"sync"
+	"time"
 
 	"github.com/samthor/thorgo/queue"
+)
+
+const (
+	keepAliveSeconds = 6
 )
 
 // CallServer runs a new socket server with an internal simple keyed protocol.
@@ -17,6 +23,18 @@ func CallServer(tr Transport, handle func(Transport) error) error {
 	conns := map[int]*activeConn{}
 	key := -1
 	lastKeySent := -1
+
+	// send keepalive every ~10sec
+	go func() {
+		for {
+			select {
+			case <-tr.Context().Done():
+				return
+			case <-time.After(time.Second * time.Duration(rand.IntN(keepAliveSeconds)+keepAliveSeconds)):
+			}
+			tr.Send([]any{})
+		}
+	}()
 
 	for {
 		var data json.RawMessage
