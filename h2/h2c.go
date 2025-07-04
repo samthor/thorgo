@@ -7,9 +7,9 @@ import (
 	"golang.org/x/net/http2/h2c"
 )
 
-// Handler wraps the given http.Handler such that it can now serve unencrypted h2 traffic.
+// H2CHandler wraps the given [http.Handler] (or nil) such that it can now serve unencrypted h2 traffic.
 // This is useful for hosting providers.
-func Handler(h http.Handler) http.Handler {
+func H2CHandler(h http.Handler) http.Handler {
 	if h == nil {
 		// h2c requires this to be passed
 		h = http.DefaultServeMux

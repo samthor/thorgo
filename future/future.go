@@ -7,8 +7,7 @@ import (
 
 // Future represents some future result.
 type Future[T any] interface {
-
-	// Wait for the future to resolve. Returns the context error if it cancels.
+	// Wait for the future to resolve. Returns the context cause if it's canceled.
 	Wait(ctx context.Context) (T, error)
 
 	// Sync checks the future's result immediately, returning false if not yet available.
@@ -23,14 +22,15 @@ type futureImpl[T any] struct {
 }
 
 func (f *futureImpl[T]) Wait(ctx context.Context) (res T, err error) {
-	if ctx.Err() != nil {
+	err = context.Cause(ctx)
+	if err != nil {
 		// reminder to self: select {} chooses a random choice, have to do this first
-		err = ctx.Err()
 		return
 	}
+
 	select {
 	case <-ctx.Done():
-		err = ctx.Err()
+		err = context.Cause(ctx)
 		return
 	case <-f.doneCh:
 	}

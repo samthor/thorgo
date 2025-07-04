@@ -70,7 +70,7 @@ func (q *queueImpl[X]) Join(ctx context.Context) Listener[X] {
 
 	q.subs[who] = q.head
 
-	return &queueListener[X]{q: q, who: who}
+	return &queueListener[X]{ctx: ctx, q: q, who: who}
 }
 
 // trimEvents must be called under lock.
@@ -130,6 +130,7 @@ func (q *queueImpl[X]) wait(who int, handler func(avail []X) int) bool {
 }
 
 type queueListener[X any] struct {
+	ctx context.Context
 	q   *queueImpl[X]
 	who int
 }
@@ -187,4 +188,8 @@ func (ql *queueListener[X]) Iter() iter.Seq[X] {
 			}
 		}
 	}
+}
+
+func (q *queueListener[X]) Context() context.Context {
+	return q.ctx
 }

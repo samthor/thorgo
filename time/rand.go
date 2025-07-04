@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// DurationRange gets a random time interval between these two values.
+// DurationRange gets a random time interval between these two values: [low,high).
 func DurationRange(low time.Duration, high time.Duration) time.Duration {
 	delta := int64(high - low)
 	mid := time.Duration(rand.Int64N(int64(delta)))

@@ -32,4 +32,7 @@ type Listener[X any] interface {
 
 	// Iter returns an iterator that internally calls Next.
 	Iter() iter.Seq[X]
+
+	// Context returns the context that this Listener was created with.
+	Context() context.Context
 }
