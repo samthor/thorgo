@@ -1,4 +1,4 @@
-package h2
+package phttp
 
 import (
 	"crypto/tls"
