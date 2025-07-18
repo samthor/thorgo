@@ -8,6 +8,8 @@ require (
 )
 
 require (
+	github.com/taylorza/go-lfsr v0.0.0-20210919045824-7ec2b93980f9
 	golang.org/x/sync v0.15.0
 	golang.org/x/text v0.26.0 // indirect
+	golang.org/x/time v0.12.0
 )

@@ -1,8 +1,7 @@
-package h2
+package serve
 
 import (
 	"crypto/tls"
-	"net/http"
 )
 
 const (
@@ -31,18 +30,13 @@ TSjjJHFKaC4H3ZQe86p+aXzKtW1yYCs=
 -----END EC PRIVATE KEY-----`
 )
 
-// ListenAndServeSelfSignedTLS is a helper which serves https with a known bad certificate.
-// As of July 2025, this is useful for Cloudflare, which allows HTTP/2 over "bad" SSL (rather than h2c).
-func ListenAndServeSelfSignedTLS(addr string, handler http.Handler) error {
+func buildSelfSignedTLSConfig() *tls.Config {
 	// you probably don't do this many times; just parse on run
 	cert, err := tls.X509KeyPair([]byte(selfSignedCrt), []byte(selfSignedKey))
 	if err != nil {
 		panic("should never fail parsing self-signed certs?")
 	}
-
-	s := http.Server{Addr: addr, Handler: handler}
-	s.TLSConfig = &tls.Config{
+	return &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	}
-	return s.ListenAndServeTLS("", "")
 }
