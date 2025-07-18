@@ -9,26 +9,20 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/samthor/thorgo/transport"
 )
 
-type ActiveCall interface {
-	// SessionID returns the globally unique ID for this session in this process.
-	// It is always an unsigned int safe for use in JavaScript.
-	SessionID() int
-
-	// ReadJSON reads JSON for the call into the given pointer.
-	ReadJSON(v any) error
-
-	// WriteJSON writes JSON from the given pointer to the call.
-	WriteJSON(v any) error
-}
-
 // CallHandler is invoked for each new remote call.
-type CallHandler func(context.Context, ActiveCall) error
+type CallHandler[Init any] func(transport.Transport, Init) error
 
 // Handler describes a call handler type that can be served over HTTP.
-type Handler struct {
-	Handler CallHandler
+type Handler[Init any] struct {
+	// InitHandler, if non-nil, handles the initial request and generates an Init.
+	// Init is JSON-encoded to the caller, so make sure that it reveals fields intentionally.
+	InitHandler func(*http.Request) (Init, error)
+
+	// CallHandler is invoked for each call.
+	CallHandler CallHandler[Init]
 
 	// SkipOriginVerify allows any hostname to connect here, not just our own.
 	SkipOriginVerify bool
@@ -46,11 +40,10 @@ type Handler struct {
 	// unexported fields
 
 	once        sync.Once
-	sessionCh   <-chan int
 	noopTimeout time.Duration
 }
 
-func (ch *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (ch *Handler[Init]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	options := &websocket.AcceptOptions{InsecureSkipVerify: ch.SkipOriginVerify}
 	sock, err := websocket.Accept(w, r, options)
 	if err != nil {
@@ -60,7 +53,7 @@ func (ch *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx, cancel := context.WithCancelCause(context.Background())
-	err = ch.runSocket(ctx, sock)
+	err = ch.runSocket(ctx, r, sock)
 	cancel(err)
 
 	var closeError websocket.CloseError

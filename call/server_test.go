@@ -13,6 +13,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/samthor/thorgo/transport"
 )
 
 const (
@@ -22,8 +23,8 @@ const (
 func setupTestServer(t *testing.T) (server *httptest.Server, conn *websocket.Conn) {
 	handler := http.NewServeMux()
 
-	h := &Handler{
-		Handler: func(ctx context.Context, ac ActiveCall) error {
+	h := &Handler[struct{}]{
+		CallHandler: func(ac transport.Transport, init struct{}) error {
 			var x struct {
 				Test string `json:"test"`
 			}
@@ -58,7 +59,7 @@ func setupTestServer(t *testing.T) (server *httptest.Server, conn *websocket.Con
 		Protocol string `json:"p"`
 	}{Protocol: "1"})
 
-	var out helloResponseMessage
+	var out helloResponseMessage[struct{}]
 	wsjson.Read(t.Context(), conn, &out)
 	if out.Ok != true {
 		t.Error("non-ok")

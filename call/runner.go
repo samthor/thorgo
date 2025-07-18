@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"sync"
 	"time"
 
@@ -13,16 +14,25 @@ import (
 	"golang.org/x/time/rate"
 )
 
-type helloResponseMessage struct {
-	Ok      bool `json:"ok"`
-	Session int  `json:"u"`
-	Limit   struct {
+type helloResponseMessage[Init any] struct {
+	Ok    bool `json:"ok"`
+	Init  Init `json:"i"`
+	Limit struct {
 		Call   *LimitConfig `json:"c,omitzero"`
 		Packet *LimitConfig `json:"p,omitzero"`
 	} `json:"l"`
 }
 
-func (ch *Handler) runSocket(ctx context.Context, sock *websocket.Conn) error {
+func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock *websocket.Conn) error {
+	var init Init
+	if ch.InitHandler != nil {
+		var err error
+		init, err = ch.InitHandler(req)
+		if err != nil {
+			return err
+		}
+	}
+
 	helloCtx, helloCancel := context.WithTimeout(ctx, helloTimeout)
 	defer helloCancel()
 
@@ -39,17 +49,15 @@ func (ch *Handler) runSocket(ctx context.Context, sock *websocket.Conn) error {
 	}
 
 	ch.once.Do(func() {
-		ch.sessionCh = newIDGenerator()
 		if ch.noopTimeout <= 0 {
 			ch.noopTimeout = noopTimeout
 		}
 	})
-	sessionId := <-ch.sessionCh
 
 	// send initial response to hello
-	var responseMessage helloResponseMessage
+	var responseMessage helloResponseMessage[Init]
 	responseMessage.Ok = true
-	responseMessage.Session = sessionId
+	responseMessage.Init = init
 	responseMessage.Limit.Call = ch.CallLimit
 	responseMessage.Limit.Packet = ch.PacketLimit
 
@@ -58,8 +66,7 @@ func (ch *Handler) runSocket(ctx context.Context, sock *websocket.Conn) error {
 		return err
 	}
 
-	session := &activeSession{
-		sessionId:     sessionId,
+	session := &activeSession[Init]{
 		ch:            ch,
 		ctx:           ctx,
 		conn:          sock,
@@ -79,12 +86,15 @@ type controlMessage struct {
 }
 
 type activeCall struct {
-	sessionId int
-	ctx       context.Context
-	cancel    context.CancelCauseFunc
-	q         queue.Queue[json.RawMessage]
-	listener  queue.Listener[json.RawMessage]
-	send      func(v json.RawMessage)
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	q        queue.Queue[json.RawMessage]
+	listener queue.Listener[json.RawMessage]
+	send     func(v json.RawMessage)
+}
+
+func (a *activeCall) Context() context.Context {
+	return a.ctx
 }
 
 func (a *activeCall) ReadJSON(v any) error {
@@ -109,14 +119,10 @@ func (a *activeCall) WriteJSON(v any) error {
 	return err
 }
 
-func (a *activeCall) SessionID() int {
-	return a.sessionId
-}
-
-type activeSession struct {
-	ctx       context.Context // context of socket
-	sessionId int
-	ch        *Handler
+type activeSession[Init any] struct {
+	ctx  context.Context // context of socket
+	init Init
+	ch   *Handler[Init]
 
 	conn        *websocket.Conn
 	callLimit   *rate.Limiter
@@ -128,13 +134,13 @@ type activeSession struct {
 	calls     map[int]*activeCall
 }
 
-func (as *activeSession) getCall(id int) *activeCall {
+func (as *activeSession[Init]) getCall(id int) *activeCall {
 	as.callsLock.RLock()
 	defer as.callsLock.RUnlock()
 	return as.calls[id]
 }
 
-func (as *activeSession) updateCall(id int, active *activeCall) {
+func (as *activeSession[Init]) updateCall(id int, active *activeCall) {
 	as.callsLock.Lock()
 	defer as.callsLock.Unlock()
 	if active == nil {
@@ -144,7 +150,7 @@ func (as *activeSession) updateCall(id int, active *activeCall) {
 	}
 }
 
-func (as *activeSession) runOutgoing(l queue.Listener[controlMessage]) error {
+func (as *activeSession[Init]) runOutgoing(l queue.Listener[controlMessage]) error {
 	lastId := -1
 	for {
 		// awkwardly do timeout-per-loop
@@ -187,7 +193,7 @@ func (as *activeSession) runOutgoing(l queue.Listener[controlMessage]) error {
 	}
 }
 
-func (session *activeSession) runProtocol1Socket(ctx context.Context) error {
+func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) error {
 	// run outgoing queue (ignore err)
 	go session.runOutgoing(session.outgoingQueue.Join(ctx))
 
@@ -253,11 +259,10 @@ func (session *activeSession) runProtocol1Socket(ctx context.Context) error {
 		l := q.Join(callCtx)
 
 		active = &activeCall{
-			sessionId: session.sessionId,
-			ctx:       callCtx,
-			cancel:    cancel,
-			q:         q,
-			listener:  l,
+			ctx:      callCtx,
+			cancel:   cancel,
+			q:        q,
+			listener: l,
 			send: func(v json.RawMessage) {
 				session.outgoingQueue.Push(controlMessage{
 					CallId: c.CallId,
@@ -268,7 +273,7 @@ func (session *activeSession) runProtocol1Socket(ctx context.Context) error {
 		session.updateCall(c.CallId, active)
 
 		go func() {
-			err := session.ch.Handler(callCtx, active)
+			err := session.ch.CallHandler(active, session.init)
 			cancel(err)
 		}()
 
