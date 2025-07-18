@@ -24,7 +24,7 @@ func setupTestServer(t *testing.T) (server *httptest.Server, conn *websocket.Con
 	handler := http.NewServeMux()
 
 	h := &Handler[struct{}]{
-		CallHandler: func(ac transport.Transport, init struct{}) error {
+		CallFunc: func(ac transport.Transport, init struct{}) error {
 			var x struct {
 				Test string `json:"test"`
 			}

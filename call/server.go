@@ -5,43 +5,9 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/coder/websocket"
-	"github.com/samthor/thorgo/transport"
 )
-
-// CallHandler is invoked for each new remote call.
-type CallHandler[Init any] func(transport.Transport, Init) error
-
-// Handler describes a call handler type that can be served over HTTP.
-type Handler[Init any] struct {
-	// InitHandler, if non-nil, handles the initial request and generates an Init.
-	// Init is JSON-encoded to the caller, so make sure that it reveals fields intentionally.
-	InitHandler func(*http.Request) (Init, error)
-
-	// CallHandler is invoked for each call.
-	CallHandler CallHandler[Init]
-
-	// SkipOriginVerify allows any hostname to connect here, not just our own.
-	SkipOriginVerify bool
-
-	// CallLimit optionally limits the number of calls allowed by a single session.
-	// This is probably just each WebSocket connection.
-	// A session will be killed if it exceeds this rate; the client must know it too.
-	CallLimit *LimitConfig
-
-	// PacketLimit optionally limits the number of packets allowed across all calls.
-	// This includes call setup/metadata packets.
-	// A session will be killed if it exceeds this rate; the client must know it too.
-	PacketLimit *LimitConfig
-
-	// unexported fields
-
-	once        sync.Once
-	noopTimeout time.Duration
-}
 
 func (ch *Handler[Init]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	options := &websocket.AcceptOptions{InsecureSkipVerify: ch.SkipOriginVerify}

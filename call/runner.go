@@ -11,6 +11,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
 	"github.com/samthor/thorgo/queue"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 )
 
@@ -24,35 +25,48 @@ type helloResponseMessage[Init any] struct {
 }
 
 func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock *websocket.Conn) error {
-	var init Init
-	if ch.InitHandler != nil {
-		var err error
-		init, err = ch.InitHandler(req)
-		if err != nil {
-			return err
-		}
-	}
-
 	helloCtx, helloCancel := context.WithTimeout(ctx, helloTimeout)
 	defer helloCancel()
 
-	// wait for hello msg
 	var helloMessage struct {
 		Protocol string `json:"p"`
 	}
-	wsjson.Read(helloCtx, sock, &helloMessage)
-	if helloMessage.Protocol != "1" {
-		return websocket.CloseError{
-			Code:   SocketCodeUnknownProtocol,
-			Reason: fmt.Sprintf("unknown protocol: %v", 1),
+	var init Init
+
+	// we want to be actively waiting for a wsjson read, it's how we are informed the socket has closed early
+	eg, groupCtx := errgroup.WithContext(helloCtx)
+
+	eg.Go(func() error {
+		err := wsjson.Read(groupCtx, sock, &helloMessage)
+		if err != nil {
+			return err
+		} else if helloMessage.Protocol != "1" {
+			return websocket.CloseError{
+				Code:   SocketCodeUnknownProtocol,
+				Reason: fmt.Sprintf("unknown protocol: %v", 1),
+			}
 		}
+		return nil
+	})
+
+	initFunc := ch.InitFunc
+	if ch.CallHandler != nil {
+		initFunc = ch.CallHandler.Init
+	}
+	if initFunc != nil {
+		eg.Go(func() error {
+			var err error
+			init, err = initFunc(groupCtx, req)
+			return err
+		})
 	}
 
-	ch.once.Do(func() {
-		if ch.noopTimeout <= 0 {
-			ch.noopTimeout = noopTimeout
-		}
-	})
+	err := eg.Wait()
+	if err != nil {
+		return err
+	}
+
+	// wait for hello msg
 
 	// send initial response to hello
 	var responseMessage helloResponseMessage[Init]
@@ -61,7 +75,7 @@ func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock 
 	responseMessage.Limit.Call = ch.CallLimit
 	responseMessage.Limit.Packet = ch.PacketLimit
 
-	err := wsjson.Write(helloCtx, sock, responseMessage)
+	err = wsjson.Write(helloCtx, sock, responseMessage)
 	if err != nil {
 		return err
 	}
@@ -154,7 +168,11 @@ func (as *activeSession[Init]) runOutgoing(l queue.Listener[controlMessage]) err
 	lastId := -1
 	for {
 		// awkwardly do timeout-per-loop
-		t := time.AfterFunc(as.ch.noopTimeout, func() { as.outgoingQueue.Push(controlMessage{}) })
+		timeout := as.ch.noopTimeout
+		if timeout <= 0 {
+			timeout = noopTimeout
+		}
+		t := time.AfterFunc(timeout, func() { as.outgoingQueue.Push(controlMessage{}) })
 
 		next, ok := l.Next()
 		t.Stop() // cancel timeout
@@ -273,7 +291,11 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 		session.updateCall(c.CallId, active)
 
 		go func() {
-			err := session.ch.CallHandler(active, session.init)
+			callFunc := session.ch.CallFunc
+			if session.ch.CallHandler != nil {
+				callFunc = session.ch.CallHandler.Call
+			}
+			err := callFunc(active, session.init)
 			cancel(err)
 		}()
 
