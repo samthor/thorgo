@@ -1,4 +1,4 @@
-package serve
+package h2
 
 import (
 	"crypto/tls"
