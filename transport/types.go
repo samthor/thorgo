@@ -2,6 +2,7 @@ package transport
 
 import (
 	"context"
+	"fmt"
 )
 
 type Transport interface {
@@ -15,6 +16,10 @@ type Transport interface {
 }
 
 type TransportError struct {
-	Code   int
-	Reason string
+	Code   int    // codes should be 0-1000
+	Reason string // string reason
+}
+
+func (te TransportError) Error() string {
+	return fmt.Sprintf("status = %v and reason = %q", te.Code, te.Reason)
 }

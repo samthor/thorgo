@@ -7,6 +7,7 @@ import (
 	"net/http"
 
 	"github.com/coder/websocket"
+	"github.com/samthor/thorgo/transport"
 )
 
 func (ch *Handler[Init]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -23,7 +24,16 @@ func (ch *Handler[Init]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	cancel(err)
 
 	var closeError websocket.CloseError
-	if errors.As(err, &closeError) {
+
+	var transportError transport.TransportError
+	if errors.As(err, &transportError) {
+		log.Printf("shutdown socket due to known reason: %+v", transportError)
+
+		closeError.Code = 3000 + websocket.StatusCode(transportError.Code)
+		closeError.Reason = transportError.Reason
+
+		sock.Close(closeError.Code, closeError.Reason)
+	} else if errors.As(err, &closeError) {
 		log.Printf("shutdown socket due to known reason: %+v", closeError)
 		sock.Close(closeError.Code, closeError.Reason)
 	} else if err != nil && err != context.Canceled {
