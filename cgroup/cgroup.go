@@ -22,6 +22,13 @@ type CGroup interface {
 	// Any returned error will cancel the group's [context.Context] directly, rather than with any provided cause.
 	// Returns true if the method has a chance of running.
 	Go(func(c context.Context) error) bool
+
+	// Halt runs the given method when this group may be about to shut down.
+	// It is passed a channel which is closed if the group restarts.
+	// It will only run after a successful Start() and then a potential shutdown.
+	// Any returned error will cancel the group's [context.Context] directly, rather than with any provided cause.
+	// Returns true if the method has a chance of running.
+	Halt(func(c context.Context, resume <-chan struct{}) error) bool
 }
 
 // New creates a new CGroup, which simply provides a [context.Context] while any passed context is active.
@@ -31,10 +38,10 @@ func New() CGroup {
 
 // NewCause creates a new CGroup that will eventually cancel with the specified cause.
 func NewCause(cause error) CGroup {
-	return &cgroup{
-		cause: cause,
-	}
+	return &cgroup{cause: cause}
 }
+
+type haltFunc func(c context.Context, resume <-chan struct{}) error
 
 type cgroup struct {
 	cause  error
@@ -43,6 +50,10 @@ type cgroup struct {
 	cancel context.CancelCauseFunc
 	active int
 	tasks  []func(context.Context) error
+	halts  []haltFunc
+
+	resumeCh    chan struct{}
+	resumeStart func(haltFunc)
 }
 
 func (cg *cgroup) Add(c context.Context) (ok bool) {
@@ -68,15 +79,57 @@ func (cg *cgroup) Add(c context.Context) (ok bool) {
 			return
 		}
 
-		// if all contexts run and die before Start(), we can still get a valid context if another one is added later :shrug:
-		if cg.ctx != nil {
-			cg.cancel(cg.cause)
+		if cg.ctx == nil {
+			// if all contexts run and die before Start(), we can still get a valid context if another one is added later :shrug:
+			return
 		}
+
+		if cg.resumeStart != nil || cg.resumeCh != nil {
+			panic("shutdown with resumeStart already set")
+		}
+
+		resumeCh := make(chan struct{})
+		resumeGroup := &sync.WaitGroup{}
+
+		resumeStart := func(hf haltFunc) {
+			resumeGroup.Add(1)
+			go func() {
+				defer resumeGroup.Done()
+				err := hf(cg.ctx, resumeCh)
+				if err != nil {
+					cg.cancel(err)
+				}
+			}()
+		}
+		cg.resumeStart = resumeStart
+		cg.resumeCh = resumeCh
+
+		for _, halt := range cg.halts {
+			resumeStart(halt)
+		}
+
+		go func() {
+			resumeGroup.Wait()
+
+			cg.lock.Lock()
+			defer cg.lock.Unlock()
+
+			if cg.resumeCh == resumeCh {
+				cg.cancel(cg.cause)
+			}
+		}()
 	})
 
 	if cg.ctx == nil {
 		return true
 	}
+
+	if cg.resumeCh != nil {
+		close(cg.resumeCh)
+		cg.resumeCh = nil
+		cg.resumeStart = nil
+	}
+
 	select {
 	case <-cg.ctx.Done():
 		return false
@@ -131,6 +184,28 @@ func (cg *cgroup) Go(fn func(context.Context) error) bool {
 	default:
 	}
 	go cg.start(fn)
+	return true
+}
+
+func (cg *cgroup) Halt(fn func(context.Context, <-chan struct{}) error) bool {
+	cg.lock.Lock()
+	defer cg.lock.Unlock()
+
+	if cg.ctx != nil {
+		select {
+		case <-cg.ctx.Done():
+			return false
+		default:
+		}
+
+		// start immediately, we're in shutdown phase
+		if cg.resumeStart != nil {
+			cg.resumeStart(fn)
+		}
+	}
+
+	// push into stack for later
+	cg.halts = append(cg.halts, fn)
 	return true
 }
 

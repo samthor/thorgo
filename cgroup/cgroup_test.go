@@ -90,3 +90,49 @@ func TestGo(t *testing.T) {
 		t.Errorf("should have run")
 	}
 }
+
+func TestHandler(t *testing.T) {
+	release := make(chan bool)
+	var calls int
+
+	cg := New()
+	cg.Halt(func(c context.Context, resume <-chan struct{}) error {
+		calls++
+		<-release
+		return nil
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cg.Add(ctx)
+	cg.Start()
+	//	time.Sleep(time.Millisecond)
+
+	cancel()
+	time.Sleep(time.Millisecond)
+
+	var secondHaltCall int
+	cg.Halt(func(c context.Context, resume <-chan struct{}) error {
+		secondHaltCall++
+		return nil
+	})
+
+	// "restart"
+	ctx, cancel = context.WithCancel(t.Context())
+	cg.Add(ctx)
+	defer cancel()
+
+	close(release)
+	if calls != 1 {
+		t.Errorf("handler not invoked: calls=%v", calls)
+	}
+
+	select {
+	case <-cg.Start().Done():
+		t.Error("should not be done")
+	case <-time.After(time.Millisecond):
+	}
+
+	if secondHaltCall != 1 {
+		t.Errorf("second halt not called")
+	}
+}

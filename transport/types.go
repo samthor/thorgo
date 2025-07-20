@@ -13,3 +13,8 @@ type Transport interface {
 	// WriteJSON writes JSON from the given data to the transport.
 	WriteJSON(v any) error
 }
+
+type TransportError struct {
+	Code   int
+	Reason string
+}
