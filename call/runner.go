@@ -94,17 +94,17 @@ func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock 
 }
 
 type controlMessage struct {
-	CallId int             `json:"c"`
-	Stop   *string         `json:"stop,omitzero"`
-	Packet json.RawMessage `json:"-"`
+	CallId int     `json:"c"`
+	Stop   *string `json:"stop,omitzero"`
+	Packet []byte  `json:"-"`
 }
 
 type activeCall struct {
 	ctx      context.Context
 	cancel   context.CancelCauseFunc
-	q        queue.Queue[json.RawMessage]
-	listener queue.Listener[json.RawMessage]
-	send     func(v json.RawMessage)
+	q        queue.Queue[[]byte]
+	listener queue.Listener[[]byte]
+	send     func(v []byte)
 }
 
 func (a *activeCall) Context() context.Context {
@@ -219,7 +219,7 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 	lastIncomingId := -1
 	lastNewCall := 0
 	for {
-		_, b, err := session.conn.Read(ctx)
+		typ, b, err := session.conn.Read(ctx)
 		if err != nil {
 			return err
 		}
@@ -228,7 +228,7 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 			return websocket.CloseError{Code: SocketCodeExcessTraffic}
 		}
 
-		if len(b) == 0 || b[0] != ':' {
+		if typ == websocket.MessageBinary || len(b) == 0 || b[0] != ':' {
 			// normal message
 			active := session.getCall(lastIncomingId)
 			if active != nil {
@@ -262,8 +262,8 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 
 		// create new call (if in order)
 		if c.CallId <= lastNewCall {
-			// can't re-use IDs
-			return websocket.CloseError{Code: SocketCodeBadCallId}
+			// can't re-use IDs (also picks up -ve IDs)
+			return websocket.CloseError{Code: SocketCodeBadCallID}
 		}
 
 		if !session.callLimit.Allow() {
@@ -273,7 +273,7 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 
 		callCtx, cancel := context.WithCancelCause(ctx)
 
-		q := queue.New[json.RawMessage]()
+		q := queue.New[[]byte]()
 		l := q.Join(callCtx)
 
 		active = &activeCall{
@@ -281,7 +281,7 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 			cancel:   cancel,
 			q:        q,
 			listener: l,
-			send: func(v json.RawMessage) {
+			send: func(v []byte) {
 				session.outgoingQueue.Push(controlMessage{
 					CallId: c.CallId,
 					Packet: v,
