@@ -136,3 +136,34 @@ func TestHandler(t *testing.T) {
 		t.Errorf("second halt not called")
 	}
 }
+
+func TestHaltTwice(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var halts int
+
+	cg := New()
+	cg.Add(ctx)
+	cg.Start()
+
+	cg.Halt(func(c context.Context, resume <-chan struct{}) error {
+		halts++
+		return nil
+	})
+	cancel()
+	time.Sleep(time.Millisecond)
+	if halts != 1 {
+		t.Errorf("expected one halt")
+	}
+
+	ctx, cancel = context.WithCancel(t.Context())
+	defer cancel()
+
+	cg.Add(ctx)
+	cancel()
+	time.Sleep(time.Millisecond)
+	if halts != 1 {
+		t.Errorf("expected one halt")
+	}
+
+}

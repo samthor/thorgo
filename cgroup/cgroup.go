@@ -59,12 +59,20 @@ type cgroup struct {
 func (cg *cgroup) Add(c context.Context) (ok bool) {
 	select {
 	case <-c.Done():
-		return false
+		return
 	default:
 	}
 
 	cg.lock.Lock()
 	defer cg.lock.Unlock()
+
+	if cg.ctx != nil {
+		select {
+		case <-cg.ctx.Done():
+			return // don't include, already done
+		default:
+		}
+	}
 
 	cg.active++
 
@@ -130,12 +138,7 @@ func (cg *cgroup) Add(c context.Context) (ok bool) {
 		cg.resumeStart = nil
 	}
 
-	select {
-	case <-cg.ctx.Done():
-		return false
-	default:
-		return true
-	}
+	return true
 }
 
 func (cg *cgroup) Start() context.Context {
