@@ -81,11 +81,12 @@ func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock 
 	}
 
 	session := &activeSession[Init]{
-		ch:            ch,
 		ctx:           ctx,
+		init:          init,
+		ch:            ch,
 		conn:          sock,
-		callLimit:     buildLimiter(ch.CallLimit),
-		packetLimit:   buildLimiter(ch.PacketLimit),
+		callLimit:     buildLimiter(ch.CallLimit, ch.ExtraLimit),
+		packetLimit:   buildLimiter(ch.PacketLimit, ch.ExtraLimit),
 		outgoingQueue: queue.New[controlMessage](),
 		calls:         map[int]*activeCall{},
 	}

@@ -37,6 +37,10 @@ type Handler[Init any] struct {
 	// A session will be killed if it exceeds this rate; the client must know it too.
 	PacketLimit *LimitConfig
 
+	// ExtraLimit can be used to allow a little extra on the optional packet limits.
+	// This isn't announced to clients, but deals with them being a little dumb/aggressive.
+	ExtraLimit float64
+
 	// EventStart can be used as a logger.
 	// It is called in a new goroutine when new connection is made.
 	EventStart func(ctx context.Context, r *http.Request)

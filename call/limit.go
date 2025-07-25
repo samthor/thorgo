@@ -9,9 +9,11 @@ type LimitConfig struct {
 	Rate  rate.Limit `json:"r"`
 }
 
-func buildLimiter(lc *LimitConfig) *rate.Limiter {
+func buildLimiter(lc *LimitConfig, extra float64) *rate.Limiter {
+	ratio := max(1.0, 1.0+extra)
+
 	if lc == nil {
 		return rate.NewLimiter(rate.Inf, 0)
 	}
-	return rate.NewLimiter(lc.Rate, lc.Burst)
+	return rate.NewLimiter(rate.Limit(float64(lc.Rate)*ratio), int(float64(lc.Burst)*ratio))
 }
