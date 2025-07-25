@@ -37,6 +37,10 @@ type Handler[Init any] struct {
 	// A session will be killed if it exceeds this rate; the client must know it too.
 	PacketLimit *LimitConfig
 
+	// EventStart can be used as a logger.
+	// It is called in a new goroutine when new connection is made.
+	EventStart func(ctx context.Context, r *http.Request)
+
 	// unexported fields
 
 	noopTimeout time.Duration

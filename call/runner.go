@@ -96,7 +96,7 @@ func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock 
 type controlMessage struct {
 	CallId int     `json:"c"`
 	Stop   *string `json:"stop,omitzero"`
-	Packet []byte  `json:"-"`
+	Packet any     `json:"-"`
 }
 
 type activeCall struct {
@@ -104,7 +104,7 @@ type activeCall struct {
 	cancel   context.CancelCauseFunc
 	q        queue.Queue[[]byte]
 	listener queue.Listener[[]byte]
-	send     func(v []byte)
+	send     func(v any)
 }
 
 func (a *activeCall) Context() context.Context {
@@ -124,13 +124,8 @@ func (a *activeCall) ReadJSON(v any) error {
 }
 
 func (a *activeCall) WriteJSON(v any) error {
-	b, err := json.Marshal(v)
-	if err != nil {
-		a.cancel(err)
-	} else {
-		a.send(b)
-	}
-	return err
+	a.send(v)
+	return nil
 }
 
 type activeSession[Init any] struct {
@@ -281,7 +276,7 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 			cancel:   cancel,
 			q:        q,
 			listener: l,
-			send: func(v []byte) {
+			send: func(v any) {
 				session.outgoingQueue.Push(controlMessage{
 					CallId: c.CallId,
 					Packet: v,
