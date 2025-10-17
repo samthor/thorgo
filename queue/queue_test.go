@@ -96,3 +96,22 @@ func TestPeek(t *testing.T) {
 		t.Errorf("got value when peeking at end: %v", value)
 	}
 }
+
+func TestPull(t *testing.T) {
+	q := New[int]()
+	p := q.Pull(t.Context())
+
+	q.Push(123)
+
+	next, _ := p(0)
+	if !reflect.DeepEqual(next, []int{123}) {
+		t.Errorf("bad pull")
+	}
+
+	time.AfterFunc(time.Millisecond*10, func() { q.Push(42) })
+	next, _ = p(time.Second)
+	if !reflect.DeepEqual(next, []int{42}) {
+		t.Errorf("bad pull, got: %+v", next)
+	}
+
+}

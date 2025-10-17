@@ -1,5 +1,9 @@
 package bimap
 
+import (
+	"iter"
+)
+
 // Map is a simple BiMap.
 // It can be inverted to get the other side.
 type Map[A, B comparable] struct {
@@ -16,6 +20,18 @@ func (m *Map[A, B]) init() {
 
 func (m *Map[A, B]) Len() (length int) {
 	return len(m.fwd)
+}
+
+func (m *Map[A, B]) Iter() (it iter.Seq2[A, B]) {
+	m.init()
+
+	return func(yield func(A, B) bool) {
+		for a, b := range m.fwd {
+			if !yield(a, b) {
+				return
+			}
+		}
+	}
 }
 
 func (m *Map[A, B]) Put(a A, b B) (ok bool) {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"iter"
 	"sync"
+	"time"
 )
 
 // New builds a new concurrent broadcast queue.
@@ -73,6 +74,38 @@ func (q *queueImpl[X]) Join(ctx context.Context) Listener[X] {
 	return &queueListener[X]{ctx: ctx, q: q, who: who}
 }
 
+func (q *queueImpl[X]) Pull(ctx context.Context) (fn PullFn[X]) {
+	iface := q.Join(ctx)
+	l := iface.(*queueListener[X])
+
+	return func(d time.Duration) (more []X, ok bool) {
+		_, ok = l.Peek()
+		if ok {
+			return l.Batch(), true
+		}
+		if d <= 0 {
+			return []X{}, true
+		}
+
+		ch := make(chan bool, 1)
+		go func() {
+			ch <- q.wait(l.who, func(avail []X) int { return 0 })
+		}()
+
+		select {
+		case <-time.After(d):
+			return []X{}, true
+		case res := <-ch:
+			if !res {
+				return nil, false // should be same as ctx.Done()
+			}
+		}
+
+		more = l.Batch()
+		return more, len(more) != 0
+	}
+}
+
 // trimEvents must be called under lock.
 func (q *queueImpl[X]) trimEvents() bool {
 	// we have the lock again, can now check who broadcast stuff and trim events
@@ -119,8 +152,8 @@ func (q *queueImpl[X]) wait(who int, handler func(avail []X) int) bool {
 		toSend := q.events[skip:]
 
 		consumed := handler(toSend)
-		if consumed <= 0 {
-			panic("must consume +ve queue entries")
+		if consumed < 0 {
+			panic("must consume zero or +ve queue entries")
 		}
 
 		consumed = min(consumed, len(toSend))
@@ -184,6 +217,20 @@ func (ql *queueListener[X]) Iter() iter.Seq[X] {
 				return
 			}
 			if !yield(next) {
+				return
+			}
+		}
+	}
+}
+
+func (ql *queueListener[X]) BatchIter() iter.Seq[[]X] {
+	return func(yield func([]X) bool) {
+		for {
+			batch := ql.Batch()
+			if len(batch) == 0 {
+				return
+			}
+			if !yield(batch) {
 				return
 			}
 		}
