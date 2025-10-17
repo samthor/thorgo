@@ -16,13 +16,14 @@ type Queue[X any] interface {
 	// If the context is cancelled, the listener becomes invalid and returns no/empty values.
 	Join(ctx context.Context) (l Listener[X])
 
-	// Pull builds a new PullFn for this Queue.
+	// Pull builds a new PullFn, bound by the given context,  for this Queue.
 	Pull(ctx context.Context) (fn PullFn[X])
 }
 
 // PullFn is a simple method which pulls events from the Queue within the duration.
+// If the duration is negative, waits forever (or until the context dies).
 // If the duration expires, returns zero but ok.
-// If the internal context has failed, returns non-ok and an empty array.
+// If the internal context has failed, returns non-ok and a nil array.
 type PullFn[X any] func(d time.Duration) (more []X, ok bool)
 
 type Listener[X any] interface {

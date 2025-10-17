@@ -83,8 +83,13 @@ func (q *queueImpl[X]) Pull(ctx context.Context) (fn PullFn[X]) {
 		if ok {
 			return l.Batch(), true
 		}
-		if d <= 0 {
+		if d == 0 {
+			// don't wait at all
 			return []X{}, true
+		} else if d < 0 {
+			// wait forever
+			more = l.Batch()
+			return more, len(more) != 0
 		}
 
 		ch := make(chan bool, 1)
