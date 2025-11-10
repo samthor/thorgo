@@ -3,26 +3,15 @@ package call
 import (
 	"context"
 	"net/http"
-	"time"
 
 	"github.com/samthor/thorgo/transport"
 )
 
-// CallFunc is invoked for each new remote call.
-type CallFunc[Init any] func(transport.Transport, Init) error
-
 // Handler describes a call handler type that can be served over HTTP.
 type Handler[Init any] struct {
 	// CallHandler points to an object which implements Init and Call.
-	// It takes preference over InitFunc/CallFunc.
+	// It is the only required part of Handler.
 	CallHandler CallHandler[Init]
-
-	// InitFunc, if non-nil, handles the initial request and generates an Init.
-	// Init is JSON-encoded to the caller, so make sure that it reveals fields intentionally.
-	InitFunc func(context.Context, *http.Request) (Init, error)
-
-	// CallFunc is invoked for each call.
-	CallFunc CallFunc[Init]
 
 	// SkipOriginVerify allows any hostname to connect here, not just our own.
 	SkipOriginVerify bool
@@ -41,16 +30,17 @@ type Handler[Init any] struct {
 	// This isn't announced to clients, but deals with them being a little dumb/aggressive.
 	ExtraLimit float64
 
-	// EventStart can be used as a logger.
-	// It is called in a new goroutine when new connection is made.
+	// EventStart can be used to log, or start another goroutine etc.
+	// It is called inline when a new connection begins, before it is passed to Init, but after it is configured as a WebSocket.
 	EventStart func(ctx context.Context, r *http.Request)
-
-	// unexported fields
-
-	noopTimeout time.Duration
 }
 
 type CallHandler[Init any] interface {
-	Init(context.Context, *http.Request) (Init, error)
-	Call(transport.Transport, Init) error
+	// Init handles the initial request (i.e., a new WebSocket) and prepares an Init for the session.
+	Init(context.Context, *http.Request) (init Init, err error)
+
+	// Call is invoked for each unique call.
+	// The ready function must be called to allow other calls to start (existing calls will still run).
+	// This is useful to allow in-order setup (since WebSocket is ordered).
+	Call(tr transport.Transport, init Init, ready func()) (err error)
 }

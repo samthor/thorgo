@@ -16,33 +16,46 @@ import (
 	"github.com/samthor/thorgo/transport"
 )
 
-const (
+func init() {
 	testNoopTimeout = time.Second / 4
-)
+}
+
+type testCallHandler struct {
+	t *testing.T
+}
+
+func (tc *testCallHandler) Init(ctx context.Context, r *http.Request) (init struct{}, err error) {
+	return
+}
+
+func (tc *testCallHandler) Call(tr transport.Transport, init struct{}, ready func()) (err error) {
+	ready()
+	ready()
+	ready()
+	var x struct {
+		Test string `json:"test"`
+	}
+	err = tr.ReadJSON(&x)
+	if x.Test != "hello" {
+		if !errors.Is(err, io.EOF) && errors.Is(err, websocket.CloseError{}) {
+			tc.t.Errorf("did not get 'hello' over socket: %v err=%v", x.Test, err)
+		}
+	}
+	return nil
+}
 
 func setupTestServer(t *testing.T) (server *httptest.Server, conn *websocket.Conn) {
 	handler := http.NewServeMux()
 
+	ch := &testCallHandler{t}
+
 	h := &Handler[struct{}]{
-		CallFunc: func(ac transport.Transport, init struct{}) error {
-			var x struct {
-				Test string `json:"test"`
-			}
-			err := ac.ReadJSON(&x)
-			if x.Test != "hello" {
-				if !errors.Is(err, io.EOF) && errors.Is(err, websocket.CloseError{}) {
-					t.Errorf("did not get 'hello' over socket: %v err=%v", x.Test, err)
-				}
-			}
-			return nil
-		},
+		CallHandler: ch,
 
 		CallLimit: &LimitConfig{
 			Burst: 2,
 			Rate:  0,
 		},
-
-		noopTimeout: testNoopTimeout,
 	}
 	handler.Handle("/s", h)
 

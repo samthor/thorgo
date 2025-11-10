@@ -20,7 +20,7 @@ func (ch *Handler[Init]) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancelCause(context.Background())
 	if ch.EventStart != nil {
-		go ch.EventStart(ctx, r)
+		ch.EventStart(ctx, r)
 	}
 
 	err = ch.runSocket(ctx, r, sock)

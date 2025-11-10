@@ -15,6 +15,10 @@ import (
 	"golang.org/x/time/rate"
 )
 
+var (
+	testNoopTimeout = time.Duration(0)
+)
+
 type helloResponseMessage[Init any] struct {
 	Ok    bool `json:"ok"`
 	Init  Init `json:"i"`
@@ -49,17 +53,11 @@ func (ch *Handler[Init]) runSocket(ctx context.Context, req *http.Request, sock 
 		return nil
 	})
 
-	initFunc := ch.InitFunc
-	if ch.CallHandler != nil {
-		initFunc = ch.CallHandler.Init
-	}
-	if initFunc != nil {
-		eg.Go(func() error {
-			var err error
-			init, err = initFunc(groupCtx, req)
-			return err
-		})
-	}
+	eg.Go(func() error {
+		var err error
+		init, err = ch.CallHandler.Init(groupCtx, req)
+		return err
+	})
 
 	err := eg.Wait()
 	if err != nil {
@@ -164,7 +162,7 @@ func (as *activeSession[Init]) runOutgoing(l queue.Listener[controlMessage]) err
 	lastId := -1
 	for {
 		// awkwardly do timeout-per-loop
-		timeout := as.ch.noopTimeout
+		timeout := testNoopTimeout
 		if timeout <= 0 {
 			timeout = noopTimeout
 		}
@@ -208,6 +206,8 @@ func (as *activeSession[Init]) runOutgoing(l queue.Listener[controlMessage]) err
 }
 
 func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) error {
+	var startLock sync.Mutex
+
 	// run outgoing queue (ignore err)
 	go session.runOutgoing(session.outgoingQueue.Join(ctx))
 
@@ -287,11 +287,17 @@ func (session *activeSession[Init]) runProtocol1Socket(ctx context.Context) erro
 		session.updateCall(c.CallId, active)
 
 		go func() {
-			callFunc := session.ch.CallFunc
-			if session.ch.CallHandler != nil {
-				callFunc = session.ch.CallHandler.Call
+			startLock.Lock()
+			var unlocked bool
+			unlockOnce := func() {
+				if !unlocked {
+					unlocked = true
+					startLock.Unlock()
+				}
 			}
-			err := callFunc(active, session.init)
+
+			err := session.ch.CallHandler.Call(active, session.init, unlockOnce)
+			unlockOnce() // in case the handler never ran it
 			cancel(err)
 		}()
 
