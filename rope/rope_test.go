@@ -20,12 +20,12 @@ const (
 )
 
 var (
-	internalNextId = 0
+	internalNextID = 0
 )
 
-func nextId() int {
-	internalNextId++
-	return internalNextId
+func nextID() int {
+	internalNextID++
+	return internalNextID
 }
 
 func BenchmarkRope(b *testing.B) {
@@ -42,25 +42,25 @@ func BenchmarkRope(b *testing.B) {
 			if len(ids) <= 2 || rand.IntN(deleteOddsOf) != 0 {
 				// insert case
 				choice := rand.IntN(len(ids))
-				afterId := ids[choice]
+				afterID := ids[choice]
 
-				newId := nextId()
-				if !r.InsertIdAfter(afterId, newId, rand.IntN(16), struct{}{}) {
+				newID := nextID()
+				if !r.InsertIDAfter(afterID, newID, rand.IntN(16), struct{}{}) {
 					b.Errorf("couldn't insert")
 				}
-				ids = append(ids, newId)
+				ids = append(ids, newID)
 
 			} else {
 				// delete case
 				choice := 1 + rand.IntN(len(ids)-2)
 
-				deleteId := ids[choice]
+				deleteID := ids[choice]
 				last := ids[len(ids)-1]
 				ids = ids[:len(ids)-1]
 				ids[choice] = last
 
-				info := r.Info(deleteId)
-				r.DeleteTo(info.Prev, deleteId)
+				info := r.Info(deleteID)
+				r.DeleteTo(info.Prev, deleteID)
 			}
 		}
 	}
@@ -72,13 +72,13 @@ func BenchmarkCompare(b *testing.B) {
 
 	for range 100_000 {
 		choice := rand.IntN(len(ids))
-		afterId := ids[choice]
+		afterID := ids[choice]
 
-		newId := nextId()
-		if !r.InsertIdAfter(afterId, newId, rand.IntN(16), struct{}{}) {
+		newID := nextID()
+		if !r.InsertIDAfter(afterID, newID, rand.IntN(16), struct{}{}) {
 			b.Errorf("couldn't insert")
 		}
-		ids = append(ids, newId)
+		ids = append(ids, newID)
 	}
 
 	// before: ~580ns/op
@@ -101,8 +101,8 @@ func TestRope(t *testing.T) {
 		r := New[int, string]()
 
 		// insert "hello" and check
-		helloId := nextId()
-		r.InsertIdAfter(0, helloId, 5, "hello")
+		helloID := nextID()
+		r.InsertIDAfter(0, helloID, 5, "hello")
 
 		if r.Count() != 1 {
 			t.Errorf("expected count=1")
@@ -110,17 +110,17 @@ func TestRope(t *testing.T) {
 		if r.Len() != 5 {
 			t.Errorf("expected len=5, was=%v", r.Len())
 		}
-		if helloId == 0 {
-			t.Errorf("expected +ve Id, was=%v", helloId)
+		if helloID == 0 {
+			t.Errorf("expected +ve ID, was=%v", helloID)
 		}
-		helloAt := r.Find(helloId)
+		helloAt := r.Find(helloID)
 		if helloAt != 5 {
 			t.Errorf("expected helloAt=5, was=%v", helloAt)
 		}
 
 		// insert " there"
-		thereId := nextId()
-		r.InsertIdAfter(helloId, thereId, 6, " there")
+		thereID := nextID()
+		r.InsertIDAfter(helloID, thereID, 6, " there")
 		if r.Len() != 11 {
 			t.Errorf("expected len=11, was=%v", r.Len())
 		}
@@ -128,51 +128,51 @@ func TestRope(t *testing.T) {
 			t.Errorf("expected count=2")
 		}
 
-		thereLookup := r.Info(thereId)
-		thereAt := r.Find(thereId)
+		thereLookup := r.Info(thereID)
+		thereAt := r.Find(thereID)
 
 		if thereAt != 11 {
 			t.Errorf("expected thereAt=11, was=%v", thereAt)
 		}
 		if !reflect.DeepEqual(thereLookup, Info[int, string]{
-			Id:      thereId,
+			ID:      thereID,
 			Next:    0,
-			Prev:    helloId,
+			Prev:    helloID,
 			DataLen: DataLen[string]{Data: " there", Len: 6},
 		}) {
 			t.Errorf("bad lookup=%+v", thereLookup)
 		}
 
 		// position
-		if id, offset := r.ByPosition(5, false); id != helloId || offset != 0 {
-			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
+		if id, offset := r.ByPosition(5, false); id != helloID || offset != 0 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloID, offset)
 		}
-		if id, offset := r.ByPosition(5, true); id != thereId || offset != 6 {
-			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, thereId, offset)
+		if id, offset := r.ByPosition(5, true); id != thereID || offset != 6 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, thereID, offset)
 		}
 		if id, offset := r.ByPosition(0, false); id != 0 || offset != 0 {
 			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, 0, offset)
 		}
-		if id, offset := r.ByPosition(0, true); id != helloId || offset != 5 {
-			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloId, offset)
+		if id, offset := r.ByPosition(0, true); id != helloID || offset != 5 {
+			t.Errorf("bad byPosition: id=%d (wanted=%d), offset=%d", id, helloID, offset)
 		}
 
 		// compare
 		var cmp int
 		var ok bool
-		cmp, ok = r.Compare(helloId, thereId)
+		cmp, ok = r.Compare(helloID, thereID)
 		if !ok || cmp >= 0 {
 			t.Errorf("bad cmp for ids (should be -1, hello before there): %v", cmp)
 		}
-		cmp, ok = r.Compare(thereId, helloId)
+		cmp, ok = r.Compare(thereID, helloID)
 		if !ok || cmp <= 0 {
 			t.Errorf("bad cmp for ids (should be +1, there not before hello): %v", cmp)
 		}
-		cmp, ok = r.Compare(thereId, thereId)
+		cmp, ok = r.Compare(thereID, thereID)
 		if !ok || cmp != 0 {
 			t.Errorf("bad cmp for ids: %v", cmp)
 		}
-		cmp, ok = r.Compare(thereId, -1)
+		cmp, ok = r.Compare(thereID, -1)
 		if ok || cmp != 0 {
 			t.Errorf("bad cmp for ids: %v", cmp)
 		}
@@ -181,19 +181,19 @@ func TestRope(t *testing.T) {
 		for id := range r.Iter(0) {
 			out = append(out, id)
 		}
-		if !reflect.DeepEqual(out, []int{helloId, thereId}) {
+		if !reflect.DeepEqual(out, []int{helloID, thereID}) {
 			t.Errorf("bad read")
 		}
 
 		// delete first
-		count := r.DeleteTo(0, helloId)
+		count := r.DeleteTo(0, helloID)
 		if count != 1 {
 			t.Errorf("expected deleted one, was: %v", count)
 		}
 		if r.Len() != 6 {
 			t.Errorf("didn't reduce by hello size: wanted=%d, got=%d", 6, r.Len())
 		}
-		if thereAt = r.Find(thereId); thereAt != 6 {
+		if thereAt = r.Find(thereID); thereAt != 6 {
 			t.Errorf("wrong there: %d", thereAt)
 		}
 		if r.Count() != 1 {
@@ -221,7 +221,7 @@ func TestRandomRope(t *testing.T) {
 			for range length {
 				s += string(rune('a' + rand.IntN(26)))
 			}
-			if !r.InsertIdAfter(parent, nextId(), length, s) {
+			if !r.InsertIDAfter(parent, nextID(), length, s) {
 				t.Errorf("couldn't insert")
 			}
 		}
@@ -231,19 +231,19 @@ func TestRandomRope(t *testing.T) {
 func TestIter(t *testing.T) {
 	r := New[int, string]()
 
-	r.InsertIdAfter(0, 1, 5, "hello")
-	if r.LastId() != 1 {
-		t.Errorf("should have first lastId")
+	r.InsertIDAfter(0, 1, 5, "hello")
+	if r.LastID() != 1 {
+		t.Errorf("should have first lastID")
 	}
 
-	r.InsertIdAfter(1, 2, 6, " there")
-	if r.LastId() != 2 {
-		t.Errorf("should have second lastId")
+	r.InsertIDAfter(1, 2, 6, " there")
+	if r.LastID() != 2 {
+		t.Errorf("should have second lastID")
 	}
 
-	r.InsertIdAfter(2, 3, 4, " bob")
-	if r.LastId() != 3 {
-		t.Errorf("should have third lastId")
+	r.InsertIDAfter(2, 3, 4, " bob")
+	if r.LastID() != 3 {
+		t.Errorf("should have third lastID")
 	}
 
 	// check delete self
@@ -286,8 +286,8 @@ func TestIter(t *testing.T) {
 		t.Errorf("should hve single entry")
 	}
 
-	if r.LastId() != 2 {
-		t.Errorf("should have second lastId, was=%v", r.LastId())
+	if r.LastID() != 2 {
+		t.Errorf("should have second lastID, was=%v", r.LastID())
 	}
 	r.DeleteTo(0, 2)
 
@@ -300,7 +300,7 @@ func TestIter(t *testing.T) {
 		t.Errorf("should not get more values: last deleted: was=%v %v", id, value)
 	}
 
-	if r.LastId() != 0 {
-		t.Errorf("should have zero lastId, was=%v", r.LastId())
+	if r.LastID() != 0 {
+		t.Errorf("should have zero lastID, was=%v", r.LastID())
 	}
 }
