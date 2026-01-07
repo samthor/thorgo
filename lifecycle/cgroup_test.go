@@ -1,4 +1,4 @@
-package cgroup
+package lifecycle
 
 import (
 	"context"
@@ -8,8 +8,8 @@ import (
 	"time"
 )
 
-func TestWithContext(t *testing.T) {
-	cg := New()
+func TestCGroupWithContext(t *testing.T) {
+	cg := NewCGroup()
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
@@ -39,10 +39,10 @@ func TestWithContext(t *testing.T) {
 	}
 }
 
-func TestNoContext(t *testing.T) {
+func TestCGroupNoContext(t *testing.T) {
 	err := fmt.Errorf("lol")
 
-	cg := NewCause(err)
+	cg := NewCGroupCause(err)
 	cgCtx := cg.Start()
 	select {
 	case <-cgCtx.Done():
@@ -55,8 +55,8 @@ func TestNoContext(t *testing.T) {
 	}
 }
 
-func TestGo(t *testing.T) {
-	cg := New()
+func TestCGroupGo(t *testing.T) {
+	cg := NewCGroup()
 
 	var started bool
 	var run atomic.Int32
@@ -91,11 +91,11 @@ func TestGo(t *testing.T) {
 	}
 }
 
-func TestHandler(t *testing.T) {
+func TestCGroupHandler(t *testing.T) {
 	release := make(chan bool)
 	var calls int
 
-	cg := New()
+	cg := NewCGroup()
 	cg.Halt(func(c context.Context, resume <-chan struct{}) error {
 		calls++
 		<-release
@@ -137,12 +137,12 @@ func TestHandler(t *testing.T) {
 	}
 }
 
-func TestHaltTwice(t *testing.T) {
+func TestCGroupHaltTwice(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	var halts int
 
-	cg := New()
+	cg := NewCGroup()
 	cg.Add(ctx)
 	cg.Start()
 

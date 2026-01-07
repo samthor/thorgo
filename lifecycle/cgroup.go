@@ -1,10 +1,11 @@
-package cgroup
+package lifecycle
 
 import (
 	"context"
 	"sync"
 )
 
+// CGroup provides a [context.Context] while any contained context is active.
 type CGroup interface {
 	// Adds the context to this group.
 	// Returns true if the underlying context is not yet done and this context was added to the active set, even briefly.
@@ -12,32 +13,37 @@ type CGroup interface {
 
 	// Starts or retrieves the prior context for this CGroup.
 	// This will be already canceled if no contexts were added.
-	Start() context.Context
+	Start() (ctx context.Context)
 
 	// Wait ensures this group has started, and then blocks until the [context.Context] is completed, returning its cause if not the default [context.Canceled].
-	Wait() error
+	Wait() (err error)
 
 	// Go runs the given method as part of this group.
 	// It will only start after Start() has been called with valid contexts.
 	// Any returned error will cancel the group's [context.Context] directly, rather than with any provided cause.
 	// Returns true if the method has a chance of running.
-	Go(func(c context.Context) error) bool
+	Go(fn func(c context.Context) (err error)) (ok bool)
 
 	// Halt runs the given method when this group may be about to shut down.
+	//
 	// It is passed a channel which is closed if the group restarts.
-	// It will only run after a successful Start() and then a potential shutdown.
+	// The method passed here should prevent further Add() calls in your code before doing teardown work.
+	// Otherwise, you risk a resume race.
+	//
+	// The passed method will only run after a successful Start() and then a potential shutdown.
 	// Any returned error will cancel the group's [context.Context] directly, rather than with any provided cause.
 	// Returns true if the method has a chance of running.
-	Halt(func(c context.Context, resume <-chan struct{}) error) bool
+	Halt(fn func(c context.Context, resume <-chan struct{}) (err error)) (ok bool)
 }
 
-// New creates a new CGroup, which simply provides a [context.Context] while any passed context is active.
-func New() CGroup {
-	return NewCause(nil)
+// NewCGroup creates a new CGroup, which simply provides a [context.Context] while any passed context is active.
+// The new context is not derived from anything.
+func NewCGroup() (cg CGroup) {
+	return NewCGroupCause(nil)
 }
 
-// NewCause creates a new CGroup that will eventually cancel with the specified cause.
-func NewCause(cause error) CGroup {
+// NewCGroupCause creates a new CGroup that will eventually cancel with the specified cause.
+func NewCGroupCause(cause error) (cg CGroup) {
 	return &cgroup{cause: cause}
 }
 
@@ -57,23 +63,16 @@ type cgroup struct {
 }
 
 func (cg *cgroup) Add(c context.Context) (ok bool) {
-	select {
-	case <-c.Done():
+	if IsDone(c) {
 		return
-	default:
 	}
 
 	cg.lock.Lock()
 	defer cg.lock.Unlock()
 
-	if cg.ctx != nil {
-		select {
-		case <-cg.ctx.Done():
-			return // don't include, already done
-		default:
-		}
+	if cg.ctx != nil && IsDone(cg.ctx) {
+		return // don't include, already done
 	}
-
 	cg.active++
 
 	context.AfterFunc(c, func() {
@@ -181,10 +180,8 @@ func (cg *cgroup) Go(fn func(context.Context) error) bool {
 		return true
 	}
 
-	select {
-	case <-cg.ctx.Done():
+	if IsDone(cg.ctx) {
 		return false
-	default:
 	}
 	go cg.start(fn)
 	return true
@@ -195,10 +192,8 @@ func (cg *cgroup) Halt(fn func(context.Context, <-chan struct{}) error) bool {
 	defer cg.lock.Unlock()
 
 	if cg.ctx != nil {
-		select {
-		case <-cg.ctx.Done():
+		if IsDone(cg.ctx) {
 			return false
-		default:
 		}
 
 		// start immediately, we're in shutdown phase
