@@ -3,58 +3,74 @@ package transport
 import (
 	"context"
 	"encoding/json"
-
-	"github.com/samthor/thorgo/queue"
 )
 
-// NewPair constructs two Transport interfaces that are connected to each other and have an infinite buffer.
-// This is likely for testing.
-func NewPair(ctx context.Context) (Transport, Transport) {
-	l := &testTransport{
-		ctx: ctx,
-		q:   queue.New[json.RawMessage](),
-	}
-	r := &testTransport{
-		ctx: ctx,
-		q:   queue.New[json.RawMessage](),
-	}
+// NewBufferPair constructs two Transport interfaces that are connected to each other.
+// Pass a buffer size, or zero for blocking.
+// Internally uses channels, so write/read has those semantics.
+func NewBufferPair(ctx context.Context, size int) (Transport, Transport) {
+	done := make(chan struct{})
 
-	l.l = r.q.Join(ctx)
-	r.l = l.q.Join(ctx)
+	ch1 := make(chan json.RawMessage, size)
+	ch2 := make(chan json.RawMessage, size)
+
+	l := &bufferTransport{ctx: ctx, readCh: ch1, writeCh: ch2, doneCh: done}
+	r := &bufferTransport{ctx: ctx, readCh: ch2, writeCh: ch1, doneCh: done}
+
+	// close immediately if already done (don't wait for goroutine)
+	select {
+	case <-ctx.Done():
+		close(done)
+	default:
+		context.AfterFunc(ctx, func() { close(done) })
+	}
 
 	return l, r
 }
 
-type testTransport struct {
-	ctx context.Context
-	q   queue.Queue[json.RawMessage]
-	l   queue.Listener[json.RawMessage]
+type bufferTransport struct {
+	ctx     context.Context
+	readCh  <-chan json.RawMessage
+	writeCh chan<- json.RawMessage
+	doneCh  <-chan struct{}
 }
 
-func (t *testTransport) Context() context.Context {
+func (t *bufferTransport) Context() context.Context {
 	return t.ctx
 }
 
-func (t *testTransport) ReadJSON(v any) error {
-	raw, ok := t.l.Next()
-	if !ok {
-		return context.Cause(t.ctx)
-	}
-	return json.Unmarshal(raw, v)
-}
-
-func (t *testTransport) WriteJSON(v any) error {
+func (t *bufferTransport) ReadJSON(v any) (err error) {
 	select {
-	case <-t.ctx.Done():
+	case <-t.doneCh:
 		return context.Cause(t.ctx)
 	default:
 	}
 
-	b, err := json.Marshal(v)
+	select {
+	case <-t.doneCh:
+		return context.Cause(t.ctx)
+	case raw := <-t.readCh:
+		return json.Unmarshal(raw, v)
+	}
+}
+
+func (t *bufferTransport) WriteJSON(v any) (err error) {
+	select {
+	case <-t.doneCh:
+		return context.Cause(t.ctx)
+	default:
+	}
+
+	var b []byte
+	b, err = json.Marshal(v)
 	if err != nil {
 		return err
 	}
 
-	t.q.Push(b)
-	return nil
+	select {
+	case t.writeCh <- b:
+		return nil // ok, sent!
+	case <-t.doneCh:
+		return context.Cause(t.ctx)
+	}
 }
