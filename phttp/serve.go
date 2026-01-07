@@ -13,7 +13,7 @@ import (
 //
 // By default, it serves on the env PORT or port 8080 and supports H2C.
 // It can also be configured with self-signed SSL, useful for some providers.
-func ListenAndServe(opts *ListenAndServeOpts) error {
+func ListenAndServe(opts *ListenAndServeOpts) (err error) {
 	if opts == nil {
 		opts = &ListenAndServeOpts{}
 	}

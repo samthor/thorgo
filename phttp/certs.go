@@ -2,6 +2,7 @@ package phttp
 
 import (
 	"crypto/tls"
+	"sync"
 )
 
 const (
@@ -30,13 +31,18 @@ TSjjJHFKaC4H3ZQe86p+aXzKtW1yYCs=
 -----END EC PRIVATE KEY-----`
 )
 
-func buildSelfSignedTLSConfig() *tls.Config {
-	// you probably don't do this many times; just parse on run
-	cert, err := tls.X509KeyPair([]byte(selfSignedCrt), []byte(selfSignedKey))
-	if err != nil {
-		panic("should never fail parsing self-signed certs?")
-	}
-	return &tls.Config{
-		Certificates: []tls.Certificate{cert},
-	}
+var (
+	once                  sync.Once
+	selfSignedCertificate tls.Certificate
+)
+
+func buildSelfSignedTLSConfig() (config *tls.Config) {
+	once.Do(func() {
+		var err error
+		selfSignedCertificate, err = tls.X509KeyPair([]byte(selfSignedCrt), []byte(selfSignedKey))
+		if err != nil {
+			panic("should never fail parsing self-signed certs?")
+		}
+	})
+	return &tls.Config{Certificates: []tls.Certificate{selfSignedCertificate}}
 }
