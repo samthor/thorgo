@@ -16,6 +16,9 @@ type TGroup[T comparable] interface {
 
 	// Access provides a derived context that is valid while any T passes the given check, and has a valid context.
 	Access(parent context.Context, check Check[T]) (derived context.Context)
+
+	// Permit performs a one-time check to determine whether any T passes the given check.
+	Permit(parent context.Context, check Check[T]) (err error)
 }
 
 // Check checks the given token.
@@ -146,4 +149,16 @@ func (t *tgroup[T]) Access(parent context.Context, check Check[T]) (derived cont
 	}()
 
 	return
+}
+
+func (t *tgroup[T]) Permit(parent context.Context, check Check[T]) (err error) {
+	err = context.Cause(parent)
+	if err != nil {
+		return
+	}
+
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+
+	return t.internalCheck(parent, check)
 }
