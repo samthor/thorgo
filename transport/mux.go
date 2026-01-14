@@ -7,6 +7,11 @@ import (
 	"sync"
 )
 
+var (
+	ErrMuxBufferFull = errors.New("mux buffer full")
+	ErrRemoteStop    = errors.New("remote normal stop")
+)
+
 const (
 	// DefaultMuxMessageBuffer is the default number of messages allowed to be pending on a sub-transport.
 	DefaultMuxMessageBuffer = 128
@@ -22,20 +27,21 @@ type MuxConfig[ID comparable] struct {
 	Handler func(id ID, t Transport) (err error)
 
 	// Untagged is invoked when a packet with no ID is observed.
-	// This is invoked synchronously. If it returns an error, the Mux is closed.
+	// This is invoked synchronously.
+	// If it returns an error, the Mux is closed.
 	Untagged func(msg json.RawMessage) (err error)
 }
 
 // Mux blocks and processes incoming packets on the given Transport, demultiplexing them.
 //
 // The wire protocol is a stream of JSON objects with the following fields:
-//   - "id": The ID of the sub-transport. If omitted, the previous ID is used.
-//     On incoming packets, the zero value routes to the Untagged handler.
+//   - "id": The ID of the sub-transport.
+//     If omitted, the previous ID is used.
+//     On incoming packets, the zero value (e.g., "" or zero) routes to the Untagged handler.
 //   - "p": The payload for the sub-transport.
 //   - "stop": If present, closes the sub-transport.
 //
-// Both sides maintain a "sticky" ID; it is only sent when it changes from the
-// previously sent or received ID on that physical transport.
+// Both sides maintain a "sticky" ID; it is only sent when it changes from the previously sent or received ID on that physical transport.
 func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 	if cfg.Handler == nil {
 		cfg.Handler = func(id ID, t Transport) (err error) { return nil }
@@ -87,12 +93,13 @@ func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 
 		// stop is performed under lock
 		if raw.Stop != nil {
+			reason := *raw.Stop
 			if ok {
-				reason := *raw.Stop
-				if reason == "" {
-					reason = "peer closed"
+				err := ErrRemoteStop
+				if reason != "" {
+					err = errors.New("remote: " + reason)
 				}
-				sub.cancel(errors.New(reason))
+				sub.cancel(err)
 
 				// Inline remove to allow immediate re-use of the ID.
 				delete(m.known, id)
@@ -127,7 +134,7 @@ func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 			// ignore
 		default:
 			// sub-transport buffer full; kill it
-			sub.cancel(errors.New("mux buffer full"))
+			sub.cancel(ErrMuxBufferFull)
 		}
 	}
 }
