@@ -26,10 +26,10 @@ type MuxConfig[ID comparable] struct {
 	// Handler is invoked when a new ID is observed.
 	Handler func(id ID, t Transport) (err error)
 
-	// Untagged is invoked when a packet with no ID is observed.
+	// Default is invoked when a packet with no ID is observed.
 	// This is invoked synchronously.
 	// If it returns an error, the Mux is closed.
-	Untagged func(msg json.RawMessage) (err error)
+	Default func(msg json.RawMessage) (err error)
 }
 
 // Mux blocks and processes incoming packets on the given Transport, demultiplexing them.
@@ -37,7 +37,7 @@ type MuxConfig[ID comparable] struct {
 // The wire protocol is a stream of JSON objects with the following fields:
 //   - "id": The ID of the sub-transport.
 //     If omitted, the previous ID is used.
-//     On incoming packets, the zero value (e.g., "" or zero) routes to the Untagged handler.
+//     On incoming packets, the zero value (e.g., "" or zero) routes to the default handler.
 //   - "p": The payload for the sub-transport.
 //   - "stop": If present, closes the sub-transport.
 //
@@ -46,8 +46,8 @@ func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 	if cfg.Handler == nil {
 		cfg.Handler = func(id ID, t Transport) (err error) { return nil }
 	}
-	if cfg.Untagged == nil {
-		cfg.Untagged = func(msg json.RawMessage) (err error) { return nil }
+	if cfg.Default == nil {
+		cfg.Default = func(msg json.RawMessage) (err error) { return nil }
 	}
 
 	m := &muxImpl[ID]{
@@ -82,7 +82,7 @@ func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 
 		var zeroID ID
 		if id == zeroID {
-			if err := cfg.Untagged(raw.P); err != nil {
+			if err := cfg.Default(raw.P); err != nil {
 				return err
 			}
 			continue

@@ -33,7 +33,7 @@ func TestMuxString(t *testing.T) {
 					}
 				}
 			},
-			Untagged: func(msg json.RawMessage) error {
+			Default: func(msg json.RawMessage) error {
 				var s string
 				if err := json.Unmarshal(msg, &s); err != nil {
 					return err
