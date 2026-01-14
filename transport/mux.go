@@ -71,7 +71,7 @@ func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
 			return err
 		}
 
-		// missing ID uses prior ID; zero ID routes to Untagged
+		// missing ID uses prior ID; zero ID routes to Default
 		var id ID
 		if raw.ID == nil {
 			id = lastID
