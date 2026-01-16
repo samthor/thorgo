@@ -24,11 +24,12 @@ type MuxOptions struct {
 }
 
 type MuxHandler[ID comparable] interface {
-	// Handler is invoked when a new ID is observed.
+	// Handler is invoked inside a goroutine when a new ID is observed.
+	// If it returns an error, the Mux is closed.
 	Handler(id ID, t Transport) (err error)
 
-	// Default is invoked when a packet with no ID is observed.
-	// This is invoked synchronously.
+	// Default is invoked when a packet with the zero ID is observed.
+	// This is invoked synchronously before further packets are processed.
 	// If it returns an error, the Mux is closed.
 	Default(msg json.RawMessage) (err error)
 }
