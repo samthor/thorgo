@@ -9,6 +9,25 @@ import (
 	"time"
 )
 
+type muxHandler[ID comparable] struct {
+	HandlerFunc func(id ID, t Transport) error
+	DefaultFunc func(msg json.RawMessage) error
+}
+
+func (m muxHandler[ID]) Handler(id ID, t Transport) error {
+	if m.HandlerFunc != nil {
+		return m.HandlerFunc(id, t)
+	}
+	return nil
+}
+
+func (m muxHandler[ID]) Default(msg json.RawMessage) error {
+	if m.DefaultFunc != nil {
+		return m.DefaultFunc(msg)
+	}
+	return nil
+}
+
 func TestMuxString(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -18,8 +37,8 @@ func TestMuxString(t *testing.T) {
 	// Server runs the Mux with string ID
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- Mux(serverTr, MuxConfig[string]{
-			Handler: func(id string, t Transport) error {
+		errCh <- Mux(serverTr, muxHandler[string]{
+			HandlerFunc: func(id string, t Transport) error {
 				for {
 					var msg string
 					if err := t.ReadJSON(&msg); err != nil {
@@ -33,7 +52,7 @@ func TestMuxString(t *testing.T) {
 					}
 				}
 			},
-			Default: func(msg json.RawMessage) error {
+			DefaultFunc: func(msg json.RawMessage) error {
 				var s string
 				if err := json.Unmarshal(msg, &s); err != nil {
 					return err
@@ -48,7 +67,7 @@ func TestMuxString(t *testing.T) {
 					P: "raw-pong",
 				})
 			},
-		})
+		}, nil)
 	}()
 
 	// 1. Client manually sends "ping" to "foo"
@@ -118,13 +137,13 @@ func TestMuxStop(t *testing.T) {
 
 	// Server runs the Mux
 	go func() {
-		Mux(serverTr, MuxConfig[string]{
-			Handler: func(id string, t Transport) error {
+		Mux(serverTr, muxHandler[string]{
+			HandlerFunc: func(id string, t Transport) error {
 				// Block until context is done (cancelled by incoming stop)
 				<-t.Context().Done()
 				return t.Context().Err() // Return the cancellation error
 			},
-		})
+		}, nil)
 	}()
 
 	// 1. Client initiates "foo" by sending a stop (simulating a close)
@@ -171,13 +190,13 @@ func TestMuxIDReuse(t *testing.T) {
 	handlerCount := 0
 	// Server runs the Mux
 	go func() {
-		Mux(serverTr, MuxConfig[string]{
-			Handler: func(id string, t Transport) error {
+		Mux(serverTr, muxHandler[string]{
+			HandlerFunc: func(id string, t Transport) error {
 				handlerCount++
 				<-t.Context().Done()
 				return nil
 			},
-		})
+		}, nil)
 	}()
 
 	// 1. Client initiates "foo"
@@ -237,8 +256,8 @@ func TestMuxServerStopAndReuse(t *testing.T) {
 	handlerCount := 0
 	// Server runs the Mux
 	go func() {
-		Mux(serverTr, MuxConfig[string]{
-			Handler: func(id string, t Transport) error {
+		Mux(serverTr, muxHandler[string]{
+			HandlerFunc: func(id string, t Transport) error {
 				handlerCount++
 				// Read one message then return (server closes)
 				var msg string
@@ -251,7 +270,7 @@ func TestMuxServerStopAndReuse(t *testing.T) {
 				// Return nil -> sends Stop to client
 				return nil
 			},
-		})
+		}, nil)
 	}()
 
 	// 1. Client initiates "foo" with "ping"

@@ -17,19 +17,20 @@ const (
 	DefaultMuxMessageBuffer = 128
 )
 
-// MuxConfig configures a call to Mux.
-type MuxConfig[ID comparable] struct {
+type MuxOptions struct {
 	// MuxMessageBuffer allows for this many messages to be pending on a sub-transport before it is canceled.
 	// Defaults to DefaultMuxMessageBuffer.
 	MuxMessageBuffer int
+}
 
+type MuxHandler[ID comparable] interface {
 	// Handler is invoked when a new ID is observed.
-	Handler func(id ID, t Transport) (err error)
+	Handler(id ID, t Transport) (err error)
 
 	// Default is invoked when a packet with no ID is observed.
 	// This is invoked synchronously.
 	// If it returns an error, the Mux is closed.
-	Default func(msg json.RawMessage) (err error)
+	Default(msg json.RawMessage) (err error)
 }
 
 // Mux blocks and processes incoming packets on the given Transport, demultiplexing them.
@@ -42,21 +43,14 @@ type MuxConfig[ID comparable] struct {
 //   - "stop": If present, closes the sub-transport.
 //
 // Both sides maintain a "sticky" ID; it is only sent when it changes from the previously sent or received ID on that physical transport.
-func Mux[ID comparable](tr Transport, cfg MuxConfig[ID]) (err error) {
-	if cfg.Handler == nil {
-		cfg.Handler = func(id ID, t Transport) (err error) { return nil }
-	}
-	if cfg.Default == nil {
-		cfg.Default = func(msg json.RawMessage) (err error) { return nil }
-	}
-
+func Mux[ID comparable](tr Transport, cfg MuxHandler[ID], options *MuxOptions) (err error) {
 	m := &muxImpl[ID]{
-		muxMessageBuffer: cfg.MuxMessageBuffer,
+		muxMessageBuffer: DefaultMuxMessageBuffer,
 		tr:               tr,
 		known:            make(map[ID]*subTransport[ID]),
 	}
-	if m.muxMessageBuffer <= 0 {
-		m.muxMessageBuffer = DefaultMuxMessageBuffer
+	if options != nil && options.MuxMessageBuffer > 0 {
+		m.muxMessageBuffer = options.MuxMessageBuffer
 	}
 
 	var lastID ID
