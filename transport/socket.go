@@ -28,6 +28,14 @@ const (
 	DefaultRateBurst = 100
 )
 
+const (
+	skewBy = 0.25
+)
+
+func randomSkew() (skew float64) {
+	return 1.0 - skewBy + rand.Float64()*(skewBy*2)
+}
+
 // HandshakeResponse is the response sent to the client after a successful hello.
 type HandshakeResponse struct {
 	Ok            bool `json:"ok"`
@@ -54,7 +62,7 @@ type SocketOpts struct {
 	// Defaults to DefaultRateBurst if zero.
 	RateBurst int
 
-	// PingEvery sends a ping every ~duration.
+	// PingEvery sends a ping every ~duration, +/- a small random variability.
 	PingEvery time.Duration
 }
 
@@ -133,7 +141,7 @@ func NewWebSocketHandler(opts SocketOpts, transportHandler Handler) (h http.Hand
 			go func() {
 				for {
 					// ping ~75% - 125% of requested time
-					d := time.Duration((0.5*rand.Float64() + 0.75) * float64(opts.PingEvery))
+					d := time.Duration(randomSkew() * float64(opts.PingEvery))
 					select {
 					case <-ctx.Done():
 						return
