@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"math/rand/v2"
 	"net/http"
+	"time"
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
@@ -51,6 +53,9 @@ type SocketOpts struct {
 	// RateBurst is the maximum burst of messages we allow.
 	// Defaults to DefaultRateBurst if zero.
 	RateBurst int
+
+	// PingEvery sends a ping every ~duration.
+	PingEvery time.Duration
 }
 
 func (o *SocketOpts) setDefaults() {
@@ -121,6 +126,23 @@ func NewWebSocketHandler(opts SocketOpts, transportHandler Handler) (h http.Hand
 			c.Close(closeErr.Code, closeErr.Reason)
 			readCancel() // only cancel readCtx after ctx
 		})
+
+		// ping if requested
+		pingEvery := opts.PingEvery
+		if pingEvery > 0 {
+			go func() {
+				for {
+					// ping ~75% - 125% of requested time
+					d := time.Duration((0.5*rand.Float64() + 0.75) * float64(opts.PingEvery))
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.Tick(d):
+					}
+					c.Ping(ctx)
+				}
+			}()
+		}
 
 		go func() {
 			err := tr.runRead(readCtx)
