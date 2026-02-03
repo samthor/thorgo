@@ -1,12 +1,14 @@
 package transport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
-	"math/rand/v2"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
@@ -16,25 +18,17 @@ import (
 
 const (
 	// DefaultMaxPacketSize is the maximum size of a JSON packet we accept.
-	DefaultMaxPacketSize = 32768
+	DefaultMaxPacketSize = 262144 // 256k, 2^18
 
 	// DefaultInMessageBuffer allows for this many packets to be pending before we close the connection.
 	DefaultInMessageBuffer = 128
 
 	// DefaultRateLimit is the number of messages per second we allow.
-	DefaultRateLimit = 100
+	DefaultRateLimit = 32
 
 	// DefaultRateBurst is the maximum burst of messages we allow.
-	DefaultRateBurst = 100
+	DefaultRateBurst = 128
 )
-
-const (
-	skewBy = 0.25
-)
-
-func randomSkew() (skew float64) {
-	return 1.0 - skewBy + rand.Float64()*(skewBy*2)
-}
 
 // HandshakeResponse is the response sent to the client after a successful hello.
 type HandshakeResponse struct {
@@ -55,15 +49,20 @@ type SocketOpts struct {
 	InMessageBuffer int
 
 	// RateLimit is the number of messages per second we allow.
+	// This is how much the 'bucket' refills per second.
 	// Defaults to DefaultRateLimit if zero.
 	RateLimit int
 
 	// RateBurst is the maximum burst of messages we allow.
+	// This is the total capacity of the 'bucket'.
 	// Defaults to DefaultRateBurst if zero.
 	RateBurst int
 
 	// PingEvery sends a ping every ~duration, +/- a small random variability.
 	PingEvery time.Duration
+
+	// SubProto, if set, must be provided by the client for this socket to connect properly.
+	SubProto string
 }
 
 func (o *SocketOpts) setDefaults() {
@@ -86,6 +85,7 @@ func (o *SocketOpts) setDefaults() {
 type Handler func(tr Transport) (err error)
 
 // NewWebSocketHandler returns an http.Handler that upgrades requests to WebSocket connections and wraps them in a Transport interface.
+// The returned Transport supports reading and writing ControlPacket as well as regular packets.
 // This always sets InsecureSkipVerify, you should wrap this with something that checks the origin.
 // The provided handle function is called for each established connection.
 // When the handle function returns, the WebSocket connection is closed.
@@ -174,14 +174,18 @@ func (t *wsTransport) run(opts SocketOpts, transportHandler Handler) (err error)
 	// Handshake: Expect "hello" packet with version "1".
 	// We only support version 1 for now and will error if any other version is seen.
 	var hello struct {
-		Type    string `json:"type"`
-		Version string `json:"version"`
+		Type     string `json:"type"`
+		Version  string `json:"version"`
+		SubProto string `json:"subproto"`
 	}
 	if err = t.ReadJSON(&hello); err != nil {
 		return websocket.CloseError{Code: websocket.StatusPolicyViolation, Reason: "failed to read hello"}
 	}
 	if hello.Type != "hello" || hello.Version != "1" {
 		return websocket.CloseError{Code: websocket.StatusPolicyViolation, Reason: "invalid hello or version"}
+	}
+	if hello.SubProto != opts.SubProto {
+		return websocket.CloseError{Code: websocket.StatusPolicyViolation, Reason: "invalid subproto"}
 	}
 
 	// Reply with hello response.
@@ -231,22 +235,112 @@ func (t *wsTransport) Context() (ctx context.Context) {
 }
 
 func (t *wsTransport) ReadJSON(v any) (err error) {
-	select {
-	case b := <-t.inCh:
-		err = json.Unmarshal(b, v)
+	defer func() {
 		if err != nil {
-			t.cancel(err) // kill ctx if we fail to read
+			t.cancel(err)
 		}
-		return err
+	}()
+
+	var b []byte
+
+	select {
+	case b = <-t.inCh:
+		break
 	case <-t.ctx.Done():
 		return context.Cause(t.ctx)
 	}
+
+	if len(b) != 0 {
+		var id int64
+
+		if b[0] == ':' {
+			// ok
+		} else if b[0] == '-' || (b[0] >= '0' && b[0] <= '9') {
+			// look for ":"
+			index := bytes.IndexByte(b, ':')
+			if index == -1 {
+				goto normal
+			}
+
+			id, err = strconv.ParseInt(string(b[:index]), 10, 32)
+			if err != nil {
+				return
+			}
+			b = b[index+1:]
+		}
+
+		cp, ok := v.(controlPacket)
+		if !ok {
+			// we discard the ID
+			goto normal
+		}
+		_, v = cp.control()
+		defer func() {
+			if err == nil {
+				cp.setControl(int(id))
+			}
+		}()
+	}
+
+normal:
+	err = json.Unmarshal(b, v)
+	return
 }
 
 func (t *wsTransport) WriteJSON(v any) (err error) {
-	err = wsjson.Write(t.ctx, t.conn, v)
-	if err != nil {
-		t.cancel(err) // kill ctx if we fail to write
+	defer func() {
+		if err != nil {
+			t.cancel(err)
+		}
+	}()
+
+	cp, ok := v.(controlPacket)
+	if !ok {
+		err = wsjson.Write(t.ctx, t.conn, v)
+		return
 	}
-	return err
+
+	c, p := cp.control()
+	if c == nil {
+		err = wsjson.Write(t.ctx, t.conn, v)
+		return
+	}
+
+	prefix := ":"
+	if *c != 0 {
+		prefix = fmt.Sprintf("%d:", *c)
+	}
+
+	b := []byte(prefix)
+	var wrap []byte
+	wrap, err = json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	b = append(b, wrap...)
+
+	err = t.conn.Write(t.ctx, websocket.MessageText, b)
+	return
+}
+
+// ControlPacket may be read or written over a socket-based transport and includes an additional optional control ID (any integer).
+type ControlPacket[Type any] struct {
+	C *int
+	P Type
+
+	noCopy noCopy
+	ch     chan bool
+}
+
+type controlPacket interface {
+	control() (c *int, p any)
+	setControl(v int)
+}
+
+func (cp *ControlPacket[Type]) control() (c *int, p any) {
+	return cp.C, &cp.P
+}
+
+func (cp *ControlPacket[Type]) setControl(v int) {
+	cp.C = &v
 }

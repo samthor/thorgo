@@ -256,3 +256,80 @@ func TestJSONEncodingError(t *testing.T) {
 		t.Errorf("expected close status %v, got %v (%v)", websocket.StatusInternalError, websocket.CloseStatus(err), err)
 	}
 }
+
+func TestControlPacket(t *testing.T) {
+	// Server handler
+	handler := func(tr Transport) error {
+		// 1. Read ControlPacket
+		var pkt ControlPacket[string]
+		if err := tr.ReadJSON(&pkt); err != nil {
+			return fmt.Errorf("read cp error: %w", err)
+		}
+		if pkt.C == nil || *pkt.C != 123 {
+			return fmt.Errorf("expected ID 123, got %v", pkt.C)
+		}
+		if pkt.P != "hello from client" {
+			return fmt.Errorf("expected payload 'hello from client', got %v", pkt.P)
+		}
+
+		// 2. Write ControlPacket
+		outID := 456
+		outPayload := "hello from server"
+		outPkt := ControlPacket[string]{
+			C: &outID,
+			P: outPayload,
+		}
+		if err := tr.WriteJSON(&outPkt); err != nil {
+			return fmt.Errorf("write cp error: %w", err)
+		}
+
+		// 3. Read Regular Packet (ID should be dropped)
+		var simple string
+		if err := tr.ReadJSON(&simple); err != nil {
+			return fmt.Errorf("read simple error: %w", err)
+		}
+		if simple != "ignore my id" {
+			return fmt.Errorf("expected 'ignore my id', got %q", simple)
+		}
+
+		return nil
+	}
+
+	c := connForTest(t, SocketOpts{}, handler)
+
+	// Handshake
+	if err := wsjson.Write(t.Context(), c, map[string]string{"type": "hello", "version": "1"}); err != nil {
+		t.Fatalf("handshake write failed: %v", err)
+	}
+	var resp HandshakeResponse
+	if err := wsjson.Read(t.Context(), c, &resp); err != nil {
+		t.Fatalf("handshake read failed: %v", err)
+	}
+
+	// 1. Client sends control packet manually
+	// Format: 123:"hello from client"
+	msg1 := []byte(`123:"hello from client"`)
+	if err := c.Write(t.Context(), websocket.MessageText, msg1); err != nil {
+		t.Fatalf("client write 1 failed: %v", err)
+	}
+
+	// 2. Client reads control packet manually
+	// Expected: 456:"hello from server"
+	typ, b, err := c.Read(t.Context())
+	if err != nil {
+		t.Fatalf("client read 1 failed: %v", err)
+	}
+	if typ != websocket.MessageText {
+		t.Fatalf("expected text message")
+	}
+	if string(b) != `456:"hello from server"` {
+		t.Errorf("client read 1 mismatch. got %q", string(b))
+	}
+
+	// 3. Client sends control packet, server reads as normal struct
+	// Format: 789:"ignore my id"
+	msg2 := []byte(`789:"ignore my id"`)
+	if err := c.Write(t.Context(), websocket.MessageText, msg2); err != nil {
+		t.Fatalf("client write 2 failed: %v", err)
+	}
+}
