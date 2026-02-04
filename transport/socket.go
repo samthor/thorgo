@@ -1,14 +1,11 @@
 package transport
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/coder/websocket"
@@ -231,12 +228,6 @@ func (t *wsTransport) Context() (ctx context.Context) {
 }
 
 func (t *wsTransport) ReadJSON(v any) (err error) {
-	defer func() {
-		if err != nil {
-			t.cancel(err)
-		}
-	}()
-
 	var b []byte
 
 	select {
@@ -246,100 +237,41 @@ func (t *wsTransport) ReadJSON(v any) (err error) {
 		return context.Cause(t.ctx)
 	}
 
-	if len(b) != 0 {
-		var id int64
-		var hasID bool
-
-		if b[0] == ':' {
-			b = b[1:]
-			hasID = true
-		} else if b[0] == '-' || (b[0] >= '0' && b[0] <= '9') {
-			// look for ":"
-			index := bytes.IndexByte(b, ':')
-			if index != -1 {
-				id, err = strconv.ParseInt(string(b[:index]), 10, 32)
-				if err != nil {
-					return
-				}
-				b = b[index+1:]
-				hasID = true
-			}
-		}
-
-		cp, ok := v.(controlPacket)
-		if !ok {
-			// we discard the ID
-			goto normal
-		}
-		_, v = cp.control()
-		if hasID {
-			defer func() {
-				if err == nil {
-					cp.setControl(int(id))
-				}
-			}()
-		}
-	}
-
-normal:
-	err = json.Unmarshal(b, v)
-	return
-}
-
-func (t *wsTransport) WriteJSON(v any) (err error) {
 	defer func() {
 		if err != nil {
 			t.cancel(err)
 		}
 	}()
 
-	cp, ok := v.(controlPacket)
-	if !ok {
-		err = wsjson.Write(t.ctx, t.conn, v)
-		return
-	}
-
-	c, p := cp.control()
-	if c == nil {
-		err = wsjson.Write(t.ctx, t.conn, v)
-		return
-	}
-
-	prefix := ":"
-	if *c != 0 {
-		prefix = fmt.Sprintf("%d:", *c)
-	}
-
-	b := []byte(prefix)
-	var wrap []byte
-	wrap, err = json.Marshal(p)
+	var dec ControlPacket[json.RawMessage]
+	err = dec.socketDecode(b)
 	if err != nil {
 		return err
 	}
-	b = append(b, wrap...)
 
-	err = t.conn.Write(t.ctx, websocket.MessageText, b)
+	// if the _target_ wasn't a controlPacket, just decode directly
+	cp, ok := v.(socketControlPacket)
+	if !ok {
+		err = json.Unmarshal(dec.P, v)
+	} else {
+		err = cp.update(dec)
+	}
 	return
 }
 
-// ControlPacket may be read or written over a socket-based transport and includes an additional optional control ID (any integer).
-type ControlPacket[Type any] struct {
-	C *int
-	P Type
+func (t *wsTransport) WriteJSON(v any) (err error) {
+	cp, ok := v.(socketControlPacket)
+	if ok {
+		b, err := cp.socketEncode()
+		if err != nil {
+			return err
+		}
+		return t.conn.Write(t.ctx, websocket.MessageText, b)
+	}
 
-	noCopy noCopy
-	ch     chan bool
-}
-
-type controlPacket interface {
-	control() (c *int, p any)
-	setControl(v int)
-}
-
-func (cp *ControlPacket[Type]) control() (c *int, p any) {
-	return cp.C, &cp.P
-}
-
-func (cp *ControlPacket[Type]) setControl(v int) {
-	cp.C = &v
+	err = wsjson.Write(t.ctx, t.conn, v)
+	if err != nil {
+		t.cancel(err)
+	}
+	return
 }

@@ -34,61 +34,32 @@ func DecodeSMuxArg(tr Transport, v any) (err error) {
 // If the underlying Transport was provided by NewWebSocketHandler, sends control packets appropriate for that transport.
 // The returned Transport, which is a top-level handler _above_ any other multiplexed calls, must be waited on via ReadJSON() to operate.
 func SMux(tr Transport, handler Handler) (top Transport) {
-	var impl *smuxImpl
+	return &smuxImpl{
+		ctx:     tr.Context(),
+		handler: handler,
+		calls:   map[int]*smuxTransport{},
 
-	if _, ok := tr.(*wsTransport); ok {
-		impl = &smuxImpl{
-			send: func(control bool, p json.RawMessage) (err error) {
-				if control {
-					var zero int
-					cp := ControlPacket[json.RawMessage]{C: &zero, P: p}
-					return tr.WriteJSON(&cp)
-				}
-				return tr.WriteJSON(p)
-			},
-			read: func() (control bool, p json.RawMessage, err error) {
-				var cp ControlPacket[json.RawMessage]
-				if err := tr.ReadJSON(&cp); err != nil {
-					return false, nil, err
-				}
-				if cp.C == nil {
-					return false, cp.P, nil
-				} else if *cp.C != 0 {
-					return false, nil, ErrProtocol
-				}
-				return true, cp.P, nil
-			},
-		}
-	} else {
-		// Fallback for generic Transport (e.g., tests or other implementations)
-		// We use a struct to wrap the control flag and the data.
-		type transportPacket struct {
-			Control bool            `json:"control"`
-			Data    json.RawMessage `json:"data"`
-		}
-
-		impl = &smuxImpl{
-			send: func(control bool, p json.RawMessage) (err error) {
-				tp := transportPacket{
-					Control: control,
-					Data:    p,
-				}
-				return tr.WriteJSON(tp)
-			},
-			read: func() (control bool, p json.RawMessage, err error) {
-				var tp transportPacket
-				if err := tr.ReadJSON(&tp); err != nil {
-					return false, nil, err
-				}
-				return tp.Control, tp.Data, nil
-			},
-		}
+		send: func(control bool, p json.RawMessage) (err error) {
+			if control {
+				var zero int
+				cp := ControlPacket[json.RawMessage]{C: &zero, P: p}
+				return tr.WriteJSON(&cp)
+			}
+			return tr.WriteJSON(p)
+		},
+		read: func() (control bool, p json.RawMessage, err error) {
+			var cp ControlPacket[json.RawMessage]
+			if err := tr.ReadJSON(&cp); err != nil {
+				return false, nil, err
+			}
+			if cp.C == nil {
+				return false, cp.P, nil
+			} else if *cp.C != 0 {
+				return false, nil, ErrProtocol
+			}
+			return true, cp.P, nil
+		},
 	}
-
-	impl.ctx = tr.Context()
-	impl.handler = handler
-	impl.calls = make(map[int]*smuxTransport)
-	return impl
 }
 
 type smuxImpl struct {
@@ -261,6 +232,7 @@ func (s *smuxImpl) internalSend(id int, v any, stop bool) (err error) {
 		}
 		call.cancel(stopErr)
 		delete(s.calls, id)
+		close(call.incoming) // only written to under controlLock
 
 		// we don't care what the lastOutgoingID was, just send stop
 		return s.send(true, enc)
@@ -303,11 +275,15 @@ func (s *smuxTransport) Context() (ctx context.Context) {
 }
 
 func (s *smuxTransport) ReadJSON(v any) (err error) {
-	next := <-s.incoming
-	if next == nil {
-		return ErrProtocol
+	select {
+	case next := <-s.incoming:
+		if next == nil {
+			return ErrProtocol
+		}
+		return json.Unmarshal(next, v)
+	case <-s.ctx.Done():
+		return context.Cause(s.ctx)
 	}
-	return json.Unmarshal(next, v)
 }
 
 func (s *smuxTransport) WriteJSON(v any) (err error) {
