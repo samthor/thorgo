@@ -46,12 +46,14 @@ func (t *bufferTransport) ReadJSON(v any) (err error) {
 	default:
 	}
 
+	var raw json.RawMessage
 	select {
 	case <-t.doneCh:
 		return context.Cause(t.ctx)
-	case raw := <-t.readCh:
-		return json.Unmarshal(raw, v)
+	case raw = <-t.readCh:
 	}
+
+	return controlDecode(raw, v)
 }
 
 func (t *bufferTransport) WriteJSON(v any) (err error) {
@@ -61,8 +63,7 @@ func (t *bufferTransport) WriteJSON(v any) (err error) {
 	default:
 	}
 
-	var b []byte
-	b, err = json.Marshal(v)
+	b, err := controlEncode(v)
 	if err != nil {
 		return err
 	}

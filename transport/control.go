@@ -73,3 +73,23 @@ func (cp *ControlPacket[Type]) socketDecode(b []byte) (err error) {
 
 	return json.Unmarshal(b, &cp.P)
 }
+
+func controlDecode(raw []byte, v any) (err error) {
+	var dec ControlPacket[json.RawMessage]
+	err = dec.socketDecode(raw)
+	if err != nil {
+		return err
+	}
+
+	if cp, ok := v.(socketControlPacket); ok {
+		return cp.update(dec)
+	}
+	return json.Unmarshal(dec.P, v)
+}
+
+func controlEncode(v any) (b []byte, err error) {
+	if cp, ok := v.(socketControlPacket); ok {
+		return cp.socketEncode()
+	}
+	return json.Marshal(v)
+}

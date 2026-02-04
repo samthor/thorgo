@@ -2,14 +2,12 @@ package transport
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"time"
 
 	"github.com/coder/websocket"
-	"github.com/coder/websocket/wsjson"
 	"golang.org/x/time/rate"
 )
 
@@ -231,47 +229,23 @@ func (t *wsTransport) ReadJSON(v any) (err error) {
 	var b []byte
 
 	select {
-	case b = <-t.inCh:
-		break
 	case <-t.ctx.Done():
 		return context.Cause(t.ctx)
+	case b = <-t.inCh:
 	}
 
-	defer func() {
-		if err != nil {
-			t.cancel(err)
-		}
-	}()
-
-	var dec ControlPacket[json.RawMessage]
-	err = dec.socketDecode(b)
-	if err != nil {
-		return err
-	}
-
-	// if the _target_ wasn't a controlPacket, just decode directly
-	cp, ok := v.(socketControlPacket)
-	if !ok {
-		err = json.Unmarshal(dec.P, v)
-	} else {
-		err = cp.update(dec)
-	}
-	return
-}
-
-func (t *wsTransport) WriteJSON(v any) (err error) {
-	cp, ok := v.(socketControlPacket)
-	if ok {
-		b, err := cp.socketEncode()
-		if err != nil {
-			return err
-		}
-		return t.conn.Write(t.ctx, websocket.MessageText, b)
-	}
-
-	err = wsjson.Write(t.ctx, t.conn, v)
+	err = controlDecode(b, v)
 	if err != nil {
 		t.cancel(err)
 	}
-	return
+	return err
+}
+
+func (t *wsTransport) WriteJSON(v any) (err error) {
+	b, err := controlEncode(v)
+	if err != nil {
+		t.cancel(err)
+		return err
+	}
+	return t.conn.Write(t.ctx, websocket.MessageText, b)
 }
