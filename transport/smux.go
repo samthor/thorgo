@@ -31,7 +31,8 @@ func DecodeSMuxArg(tr Transport, v any) (err error) {
 }
 
 // SMux wraps Transport and provides a multiplexer.
-// The returned Transport must be waited on via ReadJSON() to operate.
+// If the underlying Transport was provided by NewWebSocketHandler, sends control packets appropriate for that transport.
+// The returned Transport, which is a top-level handler _above_ any other multiplexed calls, must be waited on via ReadJSON() to operate.
 func SMux(tr Transport, handler Handler) (top Transport) {
 	var impl *smuxImpl
 
