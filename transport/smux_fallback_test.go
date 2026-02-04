@@ -24,7 +24,11 @@ func TestSMuxFallback(t *testing.T) {
 
 	// Server side (the SMux wrapper)
 	handler := func(tr Transport) error {
-		top := SMux(tr, func(call Transport, arg MyArg) error {
+		top := SMux(tr, func(call Transport) error {
+			var arg MyArg
+			if err := DecodeSMuxArg(call, &arg); err != nil {
+				return err
+			}
 			// Sub-transport handler
 			var msg string
 			if err := call.ReadJSON(&msg); err != nil {
@@ -96,7 +100,7 @@ func TestSMuxFallback(t *testing.T) {
 	// So we need to ensure SMux knows which call we are talking to.
 	// `processControl` sets `s.lastIncomingID = smuxControl.ID`.
 	// So the previous startCall set `lastIncomingID` to 1.
-	
+
 	// Send "call-msg"
 	tpMsg := transportPacket{
 		Control: false,

@@ -10,29 +10,33 @@ import (
 var (
 	ErrProtocol = errors.New("bad smux")
 	ErrBuffer   = errors.New("buffer full")
+	ErrNoMux    = errors.New("transport is not smux")
 )
 
 const (
 	SMuxMessageBuffer = 64
 )
 
-// ArgHandler runs a Transport with an initial Arg.
-type ArgHandler[Arg any] func(tr Transport, arg Arg) (err error)
-
-// SMuxRaw is ala SMux but simply expects an empty object for call kickoff.
-func SMuxRaw(tr Transport, handler Handler) (top Transport) {
-	return SMux(tr, func(tr Transport, arg struct{}) (err error) {
-		return handler(tr)
-	})
+// DecodeSMuxArg unmarshals the initial argument used to start the SMux call.
+// This returns ErrNoMux if the Transport is not part of an SMux call.
+func DecodeSMuxArg(tr Transport, v any) (err error) {
+	st, ok := tr.(*smuxTransport)
+	if !ok {
+		return ErrNoMux
+	}
+	if len(st.startArg) == 0 {
+		panic("startArg was nil")
+	}
+	return json.Unmarshal(st.startArg, v)
 }
 
 // SMux wraps Transport and provides a multiplexer.
 // The returned Transport must be waited on via ReadJSON() to operate.
-func SMux[Arg any](tr Transport, handler ArgHandler[Arg]) (top Transport) {
-	var impl *smuxImpl[Arg]
+func SMux(tr Transport, handler Handler) (top Transport) {
+	var impl *smuxImpl
 
 	if _, ok := tr.(*wsTransport); ok {
-		impl = &smuxImpl[Arg]{
+		impl = &smuxImpl{
 			send: func(control bool, p json.RawMessage) (err error) {
 				if control {
 					var zero int
@@ -62,7 +66,7 @@ func SMux[Arg any](tr Transport, handler ArgHandler[Arg]) (top Transport) {
 			Data    json.RawMessage `json:"data"`
 		}
 
-		impl = &smuxImpl[Arg]{
+		impl = &smuxImpl{
 			send: func(control bool, p json.RawMessage) (err error) {
 				tp := transportPacket{
 					Control: control,
@@ -86,12 +90,12 @@ func SMux[Arg any](tr Transport, handler ArgHandler[Arg]) (top Transport) {
 	return impl
 }
 
-type smuxImpl[Arg any] struct {
+type smuxImpl struct {
 	ctx  context.Context
 	send func(control bool, p json.RawMessage) (err error)
 	read func() (control bool, p json.RawMessage, err error)
 
-	handler ArgHandler[Arg]
+	handler Handler
 
 	readLock       sync.Mutex
 	lastIncomingID int
@@ -102,15 +106,15 @@ type smuxImpl[Arg any] struct {
 	calls          map[int]*smuxTransport
 }
 
-func (s *smuxImpl[Arg]) Context() (ctx context.Context) {
+func (s *smuxImpl) Context() (ctx context.Context) {
 	return s.ctx
 }
 
-func (s *smuxImpl[Arg]) processControl(p json.RawMessage) (err error) {
+func (s *smuxImpl) processControl(p json.RawMessage) (err error) {
 	var smuxControl struct {
-		ID   int     `json:"id"`
-		Stop *string `json:"stop"`
-		Arg  *Arg    `json:"arg,omitempty"`
+		ID   int             `json:"id"`
+		Stop *string         `json:"stop"`
+		Arg  json.RawMessage `json:"arg,omitempty"`
 	}
 	err = json.Unmarshal(p, &smuxControl)
 	if err != nil {
@@ -137,7 +141,7 @@ func (s *smuxImpl[Arg]) processControl(p json.RawMessage) (err error) {
 		return nil
 	}
 
-	if smuxControl.Arg != nil {
+	if len(smuxControl.Arg) != 0 {
 		callID := smuxControl.ID
 
 		if callID <= s.lastNewCallID {
@@ -151,6 +155,7 @@ func (s *smuxImpl[Arg]) processControl(p json.RawMessage) (err error) {
 			ctx:      callCtx,
 			cancel:   cancel,
 			incoming: make(chan json.RawMessage, SMuxMessageBuffer),
+			startArg: smuxControl.Arg,
 			send: func(v any) (err error) {
 				return s.internalSend(callID, v, false)
 			},
@@ -158,7 +163,7 @@ func (s *smuxImpl[Arg]) processControl(p json.RawMessage) (err error) {
 		s.calls[callID] = call
 
 		go func() {
-			err := s.handler(call, *smuxControl.Arg)
+			err := s.handler(call)
 			cancel(err)
 			s.internalSend(callID, err, true)
 		}()
@@ -169,7 +174,7 @@ func (s *smuxImpl[Arg]) processControl(p json.RawMessage) (err error) {
 	return nil
 }
 
-func (s *smuxImpl[Arg]) processPacket(control bool, p json.RawMessage) (err error) {
+func (s *smuxImpl) processPacket(control bool, p json.RawMessage) (err error) {
 	s.controlLock.Lock()
 	defer s.controlLock.Unlock()
 
@@ -195,7 +200,7 @@ func (s *smuxImpl[Arg]) processPacket(control bool, p json.RawMessage) (err erro
 	}
 }
 
-func (s *smuxImpl[Arg]) ReadJSON(v any) (err error) {
+func (s *smuxImpl) ReadJSON(v any) (err error) {
 	s.readLock.Lock()
 	defer s.readLock.Unlock()
 
@@ -218,7 +223,7 @@ func (s *smuxImpl[Arg]) ReadJSON(v any) (err error) {
 
 // internalSend enacts an outbound send.
 // This does not require a lock.
-func (s *smuxImpl[Arg]) internalSend(id int, v any, stop bool) (err error) {
+func (s *smuxImpl) internalSend(id int, v any, stop bool) (err error) {
 	if id == 0 && stop {
 		panic("can't stop id=0")
 	}
@@ -280,7 +285,7 @@ func (s *smuxImpl[Arg]) internalSend(id int, v any, stop bool) (err error) {
 	return s.send(false, enc)
 }
 
-func (s *smuxImpl[Arg]) WriteJSON(v any) (err error) {
+func (s *smuxImpl) WriteJSON(v any) (err error) {
 	return s.internalSend(0, v, false)
 }
 
@@ -288,6 +293,7 @@ type smuxTransport struct {
 	ctx      context.Context
 	cancel   context.CancelCauseFunc
 	incoming chan json.RawMessage
+	startArg json.RawMessage
 	send     func(v any) (err error)
 }
 

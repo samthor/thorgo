@@ -16,7 +16,11 @@ func TestSMux(t *testing.T) {
 
 	// Server side
 	handler := func(tr Transport) error {
-		top := SMux(tr, func(call Transport, arg MyArg) error {
+		top := SMux(tr, func(call Transport) error {
+			var arg MyArg
+			if err := DecodeSMuxArg(call, &arg); err != nil {
+				return err
+			}
 			// Sub-transport handler
 			var msg string
 			if err := call.ReadJSON(&msg); err != nil {
