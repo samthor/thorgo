@@ -80,10 +80,6 @@ func (o *SocketOpts) setDefaults() {
 	}
 }
 
-// Handler describes the wrapped method for NewWebSocketHandler.
-// It runs a Transport.
-type Handler func(tr Transport) (err error)
-
 // NewWebSocketHandler returns an http.Handler that upgrades requests to WebSocket connections and wraps them in a Transport interface.
 // The returned Transport supports reading and writing ControlPacket as well as regular packets.
 // This always sets InsecureSkipVerify, you should wrap this with something that checks the origin.

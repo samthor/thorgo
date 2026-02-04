@@ -46,3 +46,6 @@ type Transport interface {
 	// Implementations may queue sends and never return an error.
 	WriteJSON(v any) (err error)
 }
+
+// Handler runs a Transport.
+type Handler func(tr Transport) (err error)
