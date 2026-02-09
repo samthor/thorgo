@@ -48,4 +48,9 @@ type Listener[X any] interface {
 
 	// Context returns the context that this Listener was created with.
 	Context() (ctx context.Context)
+
+	// Wait returns a new channel which has a value sent on it when data is here.
+	// It does not consume the value; it is like Peek, but waits.
+	// This only ever contains a single value before being closed, or is closed immediately if the listener is invalid.
+	Wait() (ch <-chan X)
 }

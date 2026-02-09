@@ -7,14 +7,6 @@ import (
 	"time"
 )
 
-// New builds a new concurrent broadcast queue.
-func New[X any]() Queue[X] {
-	return &queueImpl[X]{
-		subs: make(map[int]int),
-		cond: sync.NewCond(&sync.Mutex{}),
-	}
-}
-
 type queueImpl[X any] struct {
 	head   int
 	events []X
@@ -25,7 +17,7 @@ type queueImpl[X any] struct {
 	observerHigh int
 }
 
-func (q *queueImpl[X]) Push(all ...X) bool {
+func (q *queueImpl[X]) Push(all ...X) (awoke bool) {
 	if len(all) == 0 {
 		return false // broadcast would be wasteful
 	}
@@ -48,7 +40,7 @@ func (q *queueImpl[X]) Push(all ...X) bool {
 	return q.trimEvents()
 }
 
-func (q *queueImpl[X]) Join(ctx context.Context) Listener[X] {
+func (q *queueImpl[X]) Join(ctx context.Context) (l Listener[X]) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -94,7 +86,7 @@ func (q *queueImpl[X]) Pull(ctx context.Context) (fn PullFn[X]) {
 
 		ch := make(chan bool, 1)
 		go func() {
-			ch <- q.wait(l.who, func(avail []X) int { return 0 })
+			ch <- q.wait(l.who, func(avail []X) (consume int) { return 0 })
 		}()
 
 		select {
@@ -112,7 +104,7 @@ func (q *queueImpl[X]) Pull(ctx context.Context) (fn PullFn[X]) {
 }
 
 // trimEvents must be called under lock.
-func (q *queueImpl[X]) trimEvents() bool {
+func (q *queueImpl[X]) trimEvents() (trimmed bool) {
 	// we have the lock again, can now check who broadcast stuff and trim events
 	// TODO: "slow" for large numbers of subs (O(n))
 	m := q.head
@@ -136,7 +128,7 @@ func (q *queueImpl[X]) trimEvents() bool {
 	return false
 }
 
-func (q *queueImpl[X]) wait(who int, handler func(avail []X) int) bool {
+func (q *queueImpl[X]) wait(who int, handler func(avail []X) (consume int)) (ok bool) {
 	q.cond.L.Lock()
 	defer q.cond.L.Unlock()
 
@@ -196,8 +188,23 @@ func (ql *queueListener[X]) Peek() (out X, ok bool) {
 	return
 }
 
+func (ql *queueListener[X]) Wait() (outCh <-chan X) {
+	ch := make(chan X, 1)
+	outCh = ch
+
+	go func() {
+		ql.q.wait(ql.who, func(avail []X) (consume int) {
+			ch <- avail[0]
+			return 0
+		})
+		close(ch)
+	}()
+
+	return
+}
+
 func (ql *queueListener[X]) Next() (out X, ok bool) {
-	ql.q.wait(ql.who, func(avail []X) int {
+	ql.q.wait(ql.who, func(avail []X) (consume int) {
 		out = avail[0]
 		ok = true
 		return 1
@@ -205,16 +212,15 @@ func (ql *queueListener[X]) Next() (out X, ok bool) {
 	return out, ok
 }
 
-func (ql *queueListener[X]) Batch() []X {
-	var out []X
-	ql.q.wait(ql.who, func(avail []X) int {
+func (ql *queueListener[X]) Batch() (out []X) {
+	ql.q.wait(ql.who, func(avail []X) (consume int) {
 		out = avail
 		return len(avail)
 	})
 	return out
 }
 
-func (ql *queueListener[X]) Iter() iter.Seq[X] {
+func (ql *queueListener[X]) Iter() (it iter.Seq[X]) {
 	return func(yield func(X) bool) {
 		for {
 			next, ok := ql.Next()
@@ -228,7 +234,7 @@ func (ql *queueListener[X]) Iter() iter.Seq[X] {
 	}
 }
 
-func (ql *queueListener[X]) BatchIter() iter.Seq[[]X] {
+func (ql *queueListener[X]) BatchIter() (it iter.Seq[[]X]) {
 	return func(yield func([]X) bool) {
 		for {
 			batch := ql.Batch()
@@ -242,6 +248,6 @@ func (ql *queueListener[X]) BatchIter() iter.Seq[[]X] {
 	}
 }
 
-func (q *queueListener[X]) Context() context.Context {
+func (q *queueListener[X]) Context() (ctx context.Context) {
 	return q.ctx
 }

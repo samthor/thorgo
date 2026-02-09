@@ -115,3 +115,61 @@ func TestPull(t *testing.T) {
 	}
 
 }
+
+func TestWait(t *testing.T) {
+	q := New[int]()
+	l := q.Join(context.Background())
+
+	// Test Wait when data is already there
+	q.Push(123)
+	ch := l.Wait()
+	v, ok := <-ch
+	if !ok || v != 123 {
+		t.Errorf("expected 123, got %v (ok=%v)", v, ok)
+	}
+
+	// Test that Wait does not consume the value
+	v, ok = l.Next()
+	if !ok || v != 123 {
+		t.Errorf("Wait should not consume, but Next got %v (ok=%v)", v, ok)
+	}
+
+	// Test Wait when data comes later
+	waitChResult := make(chan (<-chan int), 1)
+	go func() {
+		waitChResult <- l.Wait()
+	}()
+
+	time.Sleep(time.Millisecond * 10)
+	q.Push(456)
+
+	select {
+	case waitCh := <-waitChResult:
+		v, ok := <-waitCh
+		if !ok || v != 456 {
+			t.Errorf("expected 456, got %v (ok=%v)", v, ok)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Wait() to return or provide value")
+	}
+
+	// Again, should not consume
+	v, ok = l.Next()
+	if !ok || v != 456 {
+		t.Errorf("Wait should not consume (2), but Next got %v (ok=%v)", v, ok)
+	}
+
+	// Test Wait with context cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	l2 := q.Join(ctx)
+	ch3 := l2.Wait()
+	cancel()
+	select {
+	case v, ok := <-ch3:
+		if ok {
+			t.Errorf("expected closed channel, got %v", v)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for Wait() to close on cancellation")
+	}
+}
