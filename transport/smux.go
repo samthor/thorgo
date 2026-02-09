@@ -9,24 +9,23 @@ import (
 var (
 	ErrProtocol = errors.New("bad smux")
 	ErrBuffer   = errors.New("buffer full")
-	ErrNoMux    = errors.New("transport is not smux")
 )
 
 const (
 	SMuxMessageBuffer = 64
 )
 
-// DecodeSMuxArg unmarshals the initial argument used to start the SMux call.
-// This returns ErrNoMux if the Transport is not part of an SMux call.
-func DecodeSMuxArg(tr Transport, v any) (err error) {
+// SMuxArg unmarshals the initial argument used to start the SMux call, if any.
+func SMuxArg[X any](tr Transport) (x X, ok bool) {
 	st, ok := tr.(*smuxTransport)
-	if !ok {
-		return ErrNoMux
+	if !ok || len(st.startArg) == 0 {
+		return
 	}
-	if len(st.startArg) == 0 {
-		panic("startArg was nil")
+	err := json.Unmarshal(st.startArg, &x)
+	if err != nil {
+		return
 	}
-	return json.Unmarshal(st.startArg, v)
+	return x, true
 }
 
 type smuxTransport struct {
@@ -56,6 +55,7 @@ func (s *smuxTransport) ReadJSON(v any) (err error) {
 		// fall-through, random chance chose closed ch, but ctx will be done
 	case <-s.ctx.Done():
 	}
+
 	return context.Cause(s.ctx)
 }
 

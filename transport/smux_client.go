@@ -137,11 +137,14 @@ func (s *smuxClientImpl) processControl(control smuxControlPacket) (err error) {
 		s.calls[id] = call
 
 		go func() {
-			var err error
+			err := context.Canceled
 			if s.handler != nil {
 				err = s.handler(call)
+				if err == nil {
+					err = context.Canceled
+				}
 			}
-			s.internalStop(id, err)
+			s.internalStop(id, err) // stop inbound call
 		}()
 	}
 
@@ -200,7 +203,7 @@ func (s *smuxClientImpl) internalStop(id int, stopErr error) (err error) {
 	cp.P.ID = id
 	cp.P.Stop = new(string)
 
-	if stopErr != nil && stopErr != context.Canceled {
+	if stopErr != context.Canceled {
 		s := stopErr.Error()
 		cp.P.Stop = &s
 	}
@@ -270,7 +273,7 @@ func (s *smuxClientImpl) internalStart(ctx context.Context, arg any) (tr Transpo
 	s.lastOutgoingID = id
 
 	context.AfterFunc(derivedCtx, func() {
-		s.internalStop(id, context.Cause(derivedCtx))
+		s.internalStop(id, context.Cause(derivedCtx)) // stop outbound call
 	})
 
 	return call, nil

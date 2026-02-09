@@ -108,9 +108,9 @@ func TestSMuxClient(t *testing.T) {
 	}
 
 	// Verify Argument
-	var gotArg map[string]string
-	if err := DecodeSMuxArg(subC2, &gotArg); err != nil {
-		t.Fatalf("DecodeSMuxArg failed: %v", err)
+	gotArg, ok := SMuxArg[map[string]string](subC2)
+	if !ok {
+		t.Fatalf("DecodeSMuxArg failed")
 	}
 	if !reflect.DeepEqual(gotArg, arg) {
 		t.Errorf("received arg %v, want %v", gotArg, arg)
@@ -148,14 +148,14 @@ func TestSMuxClient(t *testing.T) {
 	// Let's open another call
 	arg2 := "call2"
 	subC1b := call1(ctx, arg2)
-	
+
 	var subC2b Transport
 	select {
 	case subC2b = <-incomingCalls:
 	case <-time.After(time.Second):
 		t.Fatal("timeout waiting for second call")
 	}
-	
+
 	// Verify they are distinct
 	if err := subC1b.WriteJSON("b"); err != nil {
 		t.Fatal(err)
@@ -211,7 +211,7 @@ func TestSMuxStop(t *testing.T) {
 	// 1. Initiate call and cancel with specific error
 	callCtx, callCancel := context.WithCancelCause(ctx)
 	myErr := errors.New("my custom stop error")
-	
+
 	sub1 := call1(callCtx, "arg")
 	var sub2 Transport
 	select {
