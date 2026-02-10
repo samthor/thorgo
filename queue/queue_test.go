@@ -173,3 +173,57 @@ func TestWait(t *testing.T) {
 		t.Fatal("timed out waiting for Wait() to close on cancellation")
 	}
 }
+
+func TestConsume(t *testing.T) {
+	q := New[int]()
+	l := q.Join(context.Background())
+
+	var value int
+	var ok bool
+
+	// 1. Consume from empty queue
+	value, ok = l.Consume()
+	if ok {
+		t.Errorf("expected ok=false from empty queue, got %v", value)
+	}
+
+	// 2. Push and consume
+	q.Push(1)
+	q.Push(2)
+
+	value, ok = l.Consume()
+	if !ok || value != 1 {
+		t.Errorf("expected 1, ok=true; got %v, %v", value, ok)
+	}
+
+	// 3. Verify it was consumed (Peek should show next)
+	value, ok = l.Peek()
+	if !ok || value != 2 {
+		t.Errorf("expected Peek to show 2, got %v, %v", value, ok)
+	}
+
+	value, ok = l.Consume()
+	if !ok || value != 2 {
+		t.Errorf("expected 2, ok=true; got %v, %v", value, ok)
+	}
+
+	// 4. Queue should be empty again
+	value, ok = l.Consume()
+	if ok {
+		t.Errorf("expected ok=false from empty queue (after consumption), got %v", value)
+	}
+
+	// 5. Test Consume with context cancellation
+	ctx, cancel := context.WithCancel(context.Background())
+	l2 := q.Join(ctx)
+	q.Push(3)
+	cancel()
+
+	// Wait a bit for the cancellation goroutine to run
+	time.Sleep(time.Millisecond * 10)
+
+	value, ok = l2.Consume()
+	if ok {
+		t.Errorf("expected ok=false after cancellation, got %v", value)
+	}
+}

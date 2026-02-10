@@ -165,6 +165,32 @@ type queueListener[X any] struct {
 	who int
 }
 
+func (ql *queueListener[X]) Consume() (out X, ok bool) {
+	q := ql.q
+
+	q.cond.L.Lock()
+	defer q.cond.L.Unlock()
+
+	var last int
+	last, ok = q.subs[ql.who]
+	if !ok {
+		return // "bad"
+	}
+
+	ok = last < q.head
+	if !ok {
+		return // "no events"
+	}
+
+	start := q.head - len(q.events)
+	skip := last - start
+	out = q.events[skip]
+
+	q.subs[ql.who] = last + 1
+
+	return
+}
+
 func (ql *queueListener[X]) Peek() (out X, ok bool) {
 	q := ql.q
 

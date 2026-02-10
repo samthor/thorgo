@@ -32,6 +32,11 @@ type Listener[X any] interface {
 	// It does not consume the event.
 	Peek() (x X, has bool)
 
+	// Consume tries to consume the next queue event immediately.
+	// This returns the zero X and false if there is no event or this listener is invalid.
+	// This is as Peek, but _does_ consume the event.
+	Consume() (x X, ok bool)
+
 	// Next waits for and returns the next queue event.
 	// It returns the zero X and false if this listener is invalid/cancelled context.
 	Next() (x X, ok bool)
