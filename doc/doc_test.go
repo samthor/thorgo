@@ -184,7 +184,7 @@ func TestActiveIterator(t *testing.T) {
 	// Start iterator
 	iterCtx, iterCancel := context.WithCancel(t.Context())
 	defer iterCancel()
-	
+
 	next, stop := iter.Pull(h.Active(iterCtx, nil))
 	defer stop()
 

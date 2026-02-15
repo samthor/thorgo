@@ -48,7 +48,7 @@ type SocketOpts struct {
 	// Defaults to DefaultRateLimit if zero.
 	RateLimit int
 
-	// RateBurst is the maximum burst of messages we allow.
+	// RateBurst is the maximum burst of messages we allow and the starting amount.
 	// This is the total capacity of the 'bucket'.
 	// Defaults to DefaultRateBurst if zero.
 	RateBurst int
