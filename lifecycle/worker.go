@@ -6,8 +6,9 @@ import (
 	"sync/atomic"
 )
 
-func RunFoo[E any](ctx context.Context, dataCh <-chan E, fn FooFunc[E]) (st FooStatus) {
-	f := &fooImpl[E]{
+// Worker runs a task that processes data from a channel and reports its lifecycle status.
+func Worker[E any](ctx context.Context, dataCh <-chan E, fn WorkerFunc[E]) (st WorkerStatus) {
+	w := &workerImpl[E]{
 		ctx:     ctx,
 		dataCh:  dataCh,
 		readyCh: make(chan struct{}),
@@ -16,40 +17,40 @@ func RunFoo[E any](ctx context.Context, dataCh <-chan E, fn FooFunc[E]) (st FooS
 	}
 
 	go func() {
-		f.err = fn(ctx, f.run)
+		w.err = fn(ctx, w.run)
 
 		select {
-		case <-f.readyCh:
+		case <-w.readyCh:
 			// idle must be already closed
 		default:
-			close(f.idleCh)
+			close(w.idleCh)
 		}
 
-		close(f.doneCh)
+		close(w.doneCh)
 	}()
 
-	return f
+	return w
 }
 
-type FooStatus interface {
-	// Ready returns a channel which is closed when this Foo's iterator has been started.
+type WorkerStatus interface {
+	// Ready returns a channel which is closed when this Worker's iterator has been started.
 	// This may never be closed.
 	Ready() (ch <-chan struct{})
 
-	// Idle returns a unique channel which is closed when this Foo is no longer reading its iterator.
+	// Idle returns a unique channel which is closed when this Worker is no longer reading its iterator.
 	// It yields true if Ready() was previously closed.
 	Idle() (ch <-chan bool)
 
-	// Done returns a unique channel which is closed when this Foo is finally shutdown.
+	// Done returns a unique channel which is closed when this Worker is finally shutdown.
 	// This returns any error reason (context or direct).
 	Done() (ch <-chan error)
 }
 
-// FooFunc runs a task.
+// WorkerFunc runs a task.
 // The passed iterator can only be called once, or it will panic.
-type FooFunc[E any] func(ctx context.Context, events iter.Seq[E]) (err error)
+type WorkerFunc[E any] func(ctx context.Context, events iter.Seq[E]) (err error)
 
-type fooImpl[E any] struct {
+type workerImpl[E any] struct {
 	ctx     context.Context
 	dataCh  <-chan E
 	started atomic.Bool
@@ -61,23 +62,23 @@ type fooImpl[E any] struct {
 	doneCh chan struct{}
 }
 
-func (f *fooImpl[E]) Ready() (ch <-chan struct{}) {
-	return f.readyCh
+func (w *workerImpl[E]) Ready() (ch <-chan struct{}) {
+	return w.readyCh
 }
 
-func (f *fooImpl[E]) Idle() (ch <-chan bool) {
+func (w *workerImpl[E]) Idle() (ch <-chan bool) {
 	out := make(chan bool)
 
 	go func() {
 		// wait for shutdown reason
 		select {
-		case <-f.idleCh:
-		case <-f.ctx.Done(): // TODO: is this racey?
+		case <-w.idleCh:
+		case <-w.ctx.Done(): // TODO: is this racey?
 		}
 
 		// were we ever read?
 		select {
-		case <-f.readyCh:
+		case <-w.readyCh:
 			out <- true
 		default:
 		}
@@ -87,17 +88,17 @@ func (f *fooImpl[E]) Idle() (ch <-chan bool) {
 	return out
 }
 
-func (f *fooImpl[E]) Done() (ch <-chan error) {
+func (w *workerImpl[E]) Done() (ch <-chan error) {
 	out := make(chan error, 1)
 
 	go func() {
 		select {
-		case <-f.doneCh:
-			if f.err != nil {
-				out <- f.err
+		case <-w.doneCh:
+			if w.err != nil {
+				out <- w.err
 			}
-		case <-f.ctx.Done():
-			out <- context.Cause(f.ctx)
+		case <-w.ctx.Done():
+			out <- context.Cause(w.ctx)
 		}
 		close(out)
 	}()
@@ -105,45 +106,43 @@ func (f *fooImpl[E]) Done() (ch <-chan error) {
 	return out
 }
 
-func (f *fooImpl[E]) run(yield func(e E) (more bool)) {
-	if !f.started.CompareAndSwap(false, true) {
+func (w *workerImpl[E]) run(yield func(e E) (more bool)) {
+	if !w.started.CompareAndSwap(false, true) {
 		panic("run called twice")
 	}
 
 	select {
-	case <-f.ctx.Done():
+	case <-w.ctx.Done():
 		// shutdown: we got called, but ctx was already cancelled
 		return
 	default:
 	}
 
-	close(f.readyCh) // will panic if called twice
+	close(w.readyCh) // will panic if called twice
+	defer close(w.idleCh)
 
-outer:
 	for {
 		// always check early
 		select {
-		case <-f.ctx.Done():
+		case <-w.ctx.Done():
 			// shutdown: external, ctx cancelled (immediate)
-			break outer
+			return
 		default:
 		}
 
 		// wait
 		select {
-		case next, ok := <-f.dataCh:
+		case next, ok := <-w.dataCh:
 			if !ok {
 				// shutdown: external, no more data
-				break outer
+				return
 			} else if !yield(next) {
 				// shutdown: inner, break out of iterator
-				break outer
+				return
 			}
-		case <-f.ctx.Done():
+		case <-w.ctx.Done():
 			// shutdown: external, ctx cancelled (immediate)
-			break outer
+			return
 		}
 	}
-
-	close(f.idleCh)
 }
