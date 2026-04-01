@@ -85,12 +85,7 @@ retry:
 			h.lock.Unlock()
 
 			if ok {
-				doneCh := make(chan error, 1)
-				go func() {
-					<-active.halting
-					doneCh <- active.err
-				}()
-				return active.inst, doneCh, nil
+				return active.inst, active.Done(), nil
 			}
 
 		case <-ctx.Done():
@@ -145,6 +140,9 @@ retry:
 		}
 	}
 
+	var instCancel context.CancelCauseFunc
+	var instCtx context.Context
+
 	active.group = lifecycle.NewCGroup()
 	active.group.Halt(func(ctx context.Context, resume <-chan struct{}) (err error) {
 		select {
@@ -164,20 +162,23 @@ retry:
 		}
 
 		shutdown(func() {
-			err = h.config.Destroy(ctx, key, active.inst)
+			if h.config.Destroy != nil {
+				err = h.config.Destroy(ctx, key, active.inst)
+			}
+			instCancel(err)
 		})
 		return
 	})
 
 	active.group.Add(ctx)
 	groupCtx := active.group.Start()
-	instCtx, instCancel := context.WithCancelCause(groupCtx)
+	instCtx, instCancel = context.WithCancelCause(groupCtx)
 
 	// We didn't have to wait, so that means we get to create it!
 	createReturned := false
 	var earlyCancelError error
 	cancel := func(cause error) {
-		instCancel(cause) // cancel "ourselves"
+		defer instCancel(cause) // cancel "ourselves" _after_ shutdown
 
 		h.lock.Lock()
 		if !createReturned {
@@ -191,7 +192,10 @@ retry:
 		}
 		shutdown(nil)
 	}
-	inst, err = h.config.Create(instCtx, cancel, key)
+
+	if h.config.Create != nil {
+		inst, err = h.config.Create(instCtx, cancel, key)
+	}
 
 	h.lock.Lock()
 	defer h.lock.Unlock()
@@ -220,13 +224,14 @@ retry:
 	active.failures = 0
 	close(active.ready)
 
-	doneCh := make(chan error, 1)
-	go func() {
-		<-active.halting
-		doneCh <- active.err
-	}()
+	if h.config.Run != nil {
+		go func() {
+			err = h.config.Run(instCtx, cancel, key, inst)
+			cancel(err)
+		}()
+	}
 
-	return active.inst, doneCh, nil
+	return active.inst, active.Done(), nil
 }
 
 func (h *holderImpl[K, V]) Active(ctx context.Context, filter func(key K) (include bool)) (i iter.Seq[Action[K]]) {
@@ -285,4 +290,18 @@ type activeDoc[V any] struct {
 	ready   chan struct{} // if closed, doc is ready
 	halting chan struct{} // if closed, doc is shutting down and should no longer be used
 	halted  chan struct{} // if closed, may be recreated
+}
+
+// Done creates a new <-chan error on every call, which is closed when the active doc here is halting.
+// It is optionally sent any error causing the halt (or not if there was a normal shutdown).
+func (active *activeDoc[V]) Done() (ch <-chan error) {
+	doneCh := make(chan error, 1)
+	go func() {
+		<-active.halting
+		if active.err != nil {
+			doneCh <- active.err
+		}
+		close(doneCh)
+	}()
+	return doneCh
 }

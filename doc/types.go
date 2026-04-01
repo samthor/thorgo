@@ -8,11 +8,15 @@ import (
 
 type Config[K comparable, V any] struct {
 	// Create controls creating this V.
+	// If not provided, the zero V is used.
 	// This is passed a cancel function which causes a shutdown of the context wrapping the V.
 	// Use this for errors e.g., in the background task of this V.
 	Create func(ctx context.Context, cancel context.CancelCauseFunc, key K) (inst V, err error)
 
-	// Destroy controls destroying this V.
+	// Run is optionally called when this V exists.
+	Run func(ctx context.Context, cancel context.CancelCauseFunc, key K, inst V) (err error)
+
+	// Destroy, if provided, controls destroying this V.
 	// This is called when there is no hope of restoring the object.
 	Destroy func(ctx context.Context, key K, inst V) (err error)
 
@@ -23,7 +27,7 @@ type Config[K comparable, V any] struct {
 // Holder describes a keyed storage of instance objects.
 type Holder[K comparable, V any] interface {
 	// For joins the instance with the given comparable Key while the given context is active.
-	For(ctx context.Context, key K) (inst V, done <-chan error, err error)
+	For(ctx context.Context, key K) (inst V, doneCh <-chan error, err error)
 
 	// Active returns an iterator which yields document changes over time.
 	// The first yield will always contain the current set of active documents, even if that set is empty.
