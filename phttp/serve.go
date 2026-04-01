@@ -47,7 +47,7 @@ func ListenAndServe(opts *ListenAndServeOpts) (err error) {
 
 	// actually serve
 	s := http.Server{Addr: addr, Handler: handler}
-	if opts.FakeSSL {
+	if opts.FakeSSL || os.Getenv("FAKESSL") != "" {
 		s.TLSConfig = buildSelfSignedTLSConfig()
 		return s.ListenAndServeTLS("", "")
 	}
@@ -68,5 +68,6 @@ type ListenAndServeOpts struct {
 
 	// FakeSSL runs the handler with self-signed TLS.
 	// As of July 2025, this is useful for Cloudflare, which allows HTTP/2 over "bad" SSL (rather than h2c).
+	// This also runs if the env var "FAKESSL" is non-empty.
 	FakeSSL bool
 }

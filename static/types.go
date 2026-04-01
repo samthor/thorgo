@@ -29,8 +29,8 @@ type ServeInfo struct {
 
 // Content controls what is rendered inside ServeFs.
 type Content interface {
-	Get(path string) (*FileInfo, io.ReadCloser)
-	Exists(path string) bool
+	Get(path string) (fi *FileInfo, rc io.ReadCloser)
+	Exists(path string) (exists bool)
 }
 
 // ServeFs implements http.Handler.

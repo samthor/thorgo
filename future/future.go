@@ -47,20 +47,20 @@ func (f *futureImpl[T]) Sync() (res T, err error, ok bool) {
 }
 
 // New creates a new resolvable future.
-func New[T any]() (Future[T], func(result T, err error)) {
+func New[T any]() (f Future[T], resolve func(result T, err error)) {
 	doneCh := make(chan struct{})
 
-	f := &futureImpl[T]{
+	fi := &futureImpl[T]{
 		doneCh: doneCh,
 	}
-	resolve := func(result T, err error) {
+	resolve = func(result T, err error) {
 		// ignore additional calls
-		f.once.Do(func() {
-			f.err = err
-			f.result = result
+		fi.once.Do(func() {
+			fi.err = err
+			fi.result = result
 			close(doneCh)
 		})
 	}
 
-	return f, resolve
+	return fi, resolve
 }
