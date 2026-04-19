@@ -1,7 +1,6 @@
 package asafe
 
 import (
-	"log"
 	"sync/atomic"
 	"unsafe"
 )
@@ -70,8 +69,11 @@ func (s *skipImpl[K]) All() (out []K) {
 
 // readNext returns the next entry, whether it is tombstoned, _and_ the original pointer that s.next points to (i.e., next or next+1 byte).
 func (s *skipEntry[K]) readNext() (next *skipEntry[K], dead bool, actual unsafe.Pointer) {
-	ptr := unsafe.Pointer(s.next) // just a type cast; is "same"
-	actual = atomic.LoadPointer(&ptr)
+	actual = atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&s.next)))
+
+	if uintptr(actual) == 0 {
+		return nil, false, actual
+	}
 
 	var nextPtr unsafe.Pointer
 	if uintptr(actual)&1 == 1 {
@@ -89,6 +91,8 @@ func (s *skipEntry[K]) readNext() (next *skipEntry[K], dead bool, actual unsafe.
 func (s *skipImpl[K]) Add(k K) {
 	var failures int
 
+	var fromFront int
+
 	curr := &s.head
 	for {
 		next, dead, actual := curr.readNext()
@@ -98,6 +102,7 @@ func (s *skipImpl[K]) Add(k K) {
 		// lower value is first!
 		if next != nil && !s.less(k, next.value) {
 			curr = next
+			fromFront++
 			continue
 		}
 
@@ -106,18 +111,15 @@ func (s *skipImpl[K]) Add(k K) {
 
 		// insert atomically!
 		// if not, we try whole loop again
-		ptr := unsafe.Pointer(curr.next)
-		swapped := atomic.CompareAndSwapPointer(&ptr, actual, unsafe.Pointer(alloc))
+		swapped := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&curr.next)), actual, unsafe.Pointer(alloc))
 		if !swapped {
 			failures++
 			if failures >= 5 {
 				panic("too many failures")
 			}
-			log.Printf("!!! CAS failed")
 			continue // try whole loop again
 		}
 
-		// curr.next = &alloc.alive
 		break
 	}
 }
