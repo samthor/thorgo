@@ -14,6 +14,9 @@ type KeyQueue[K comparable, P Less[P]] interface {
 	// If the K already exists, this re-orders it if the priority has changed.
 	Add(k K, p P) (anew bool)
 
+	// Delete deletes this K, returning true if a change was made.
+	Delete(k K) (ok bool)
+
 	// Next removes an item from the front of this KeyQueue.
 	// It retuns the zero values if this is empty.
 	Next() (k K, p P)

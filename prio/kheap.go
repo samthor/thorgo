@@ -69,6 +69,14 @@ func (kq *heapImpl[K, P]) Add(k K, p P) (anew bool) {
 	return true
 }
 
+func (kq *heapImpl[K, P]) Delete(k K) (ok bool) {
+	if i, ok := kq.at[k]; ok {
+		heap.Remove(kq, i)
+		return true
+	}
+	return false
+}
+
 func (kq *heapImpl[K, P]) Next() (k K, p P) {
 	if len(kq.data) != 0 {
 		k, p = kq.Peek()
