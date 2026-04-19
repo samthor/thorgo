@@ -5,15 +5,6 @@ import (
 	"unsafe"
 )
 
-func init() {
-	// since "dead" is at the start, we assume it's fixed (before K)
-	var x skipEntry[any]
-	deadOffset := unsafe.Offsetof(x.dead)
-	if deadOffset != 1 {
-		panic("bad deadOffset")
-	}
-}
-
 type SkipQueue[K any] interface {
 	// All copies everything here, for testing.
 	All() (out []K)
@@ -31,11 +22,13 @@ func NewSkipQueue[K any](less func(a, b K) (is bool)) (out SkipQueue[K]) {
 	if less == nil {
 		panic("must provide less()")
 	}
-	impl := &skipImpl[K]{
-		less: less,
+
+	var check K
+	if less(check, check) {
+		panic("zero value must not be less than itself")
 	}
 
-	return impl
+	return &skipImpl[K]{less: less}
 }
 
 type skipEntry[K any] struct {
@@ -67,32 +60,29 @@ func (s *skipImpl[K]) All() (out []K) {
 	return out
 }
 
-// readNext returns the next entry, whether it is tombstoned, _and_ the original pointer that s.next points to (i.e., next or next+1 byte).
+func (s *skipEntry[K]) nextAsPointer() (p *unsafe.Pointer) {
+	// this awkwardly gets the next ptr (naively converts it to local var)
+	return (*unsafe.Pointer)(unsafe.Pointer(&s.next))
+}
+
+// readNext atomically returns the next entry, whether it is tombstoned, _and_ the original pointer that s.next points to (i.e., next or next+1 byte).
 func (s *skipEntry[K]) readNext() (next *skipEntry[K], dead bool, actual unsafe.Pointer) {
-	actual = atomic.LoadPointer((*unsafe.Pointer)(unsafe.Pointer(&s.next)))
+	actual = atomic.LoadPointer(s.nextAsPointer())
 
-	if uintptr(actual) == 0 {
-		return nil, false, actual
-	}
-
-	var nextPtr unsafe.Pointer
 	if uintptr(actual)&1 == 1 {
 		// dead, move back
-		nextPtr = unsafe.Pointer(uintptr(actual) - 1)
+		// at := unsafe.Pointer(uintptr(actual) & ^uintptr(1))
+		at := unsafe.Pointer(uintptr(actual) - 1)
+		next = (*skipEntry[K])(at)
 		dead = true
 	} else {
-		nextPtr = actual
+		next = (*skipEntry[K])(actual)
 	}
 
-	next = (*skipEntry[K])(nextPtr)
 	return
 }
 
 func (s *skipImpl[K]) Add(k K) {
-	var failures int
-
-	var fromFront int
-
 	curr := &s.head
 	for {
 		next, dead, actual := curr.readNext()
@@ -101,8 +91,8 @@ func (s *skipImpl[K]) Add(k K) {
 		// should we insert between here and next?
 		// lower value is first!
 		if next != nil && !s.less(k, next.value) {
+			// log.Printf("%v < %v", k, next.value)
 			curr = next
-			fromFront++
 			continue
 		}
 
@@ -111,16 +101,10 @@ func (s *skipImpl[K]) Add(k K) {
 
 		// insert atomically!
 		// if not, we try whole loop again
-		swapped := atomic.CompareAndSwapPointer((*unsafe.Pointer)(unsafe.Pointer(&curr.next)), actual, unsafe.Pointer(alloc))
-		if !swapped {
-			failures++
-			if failures >= 5 {
-				panic("too many failures")
-			}
-			continue // try whole loop again
+		swapped := atomic.CompareAndSwapPointer(curr.nextAsPointer(), actual, unsafe.Pointer(alloc))
+		if swapped {
+			break
 		}
-
-		break
 	}
 }
 

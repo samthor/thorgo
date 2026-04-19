@@ -25,39 +25,50 @@ func TestX(t *testing.T) {
 	}
 }
 
-func TestConcurrent(t *testing.T) {
+func TestLarge(t *testing.T) {
 	x := NewSkipQueue(func(a, b int) (is bool) {
-		return a < b
+		// a > b, higher values go first (otensibly faster)
+		return a > b
 	})
 
-	count := 10
-	innerCount := 1
-	doneCh := make(chan bool, count)
+	// this goes fast - it's always inserting at head, not tail
+	for i := range 1_000_000 {
+		x.Add(i)
+	}
+}
 
-	for i := 0; i < count; i++ {
+func TestConcurrent(t *testing.T) {
+	x := NewSkipQueue(func(a, b int) (is bool) {
+		// a > b, higher values go first (otensibly faster)
+		return a > b
+	})
+
+	tasks := 10
+	countPerTask := 4_000 // TODO: roughly doubles every 10k
+	doneCh := make(chan bool, tasks)
+
+	for i := range tasks {
 		go func() {
-			for range innerCount {
-				x.Add(i)
+			for j := range countPerTask {
+				x.Add(i*countPerTask + j)
 			}
 			doneCh <- true
 		}()
 	}
 
-	t.Logf("waiting for %d", count)
-	for range count {
+	for range tasks {
 		<-doneCh
 	}
 
 	data := x.All()
-	if len(data) != count*innerCount {
+	if len(data) != tasks*countPerTask {
 		t.Fatalf("wrong count: %v", len(data))
 	}
 
+	// assemble expected output (just sort all ints - we "don't care" about prior order)
 	var expected []int
-	for i := range count {
-		for j := 0; j < innerCount; j++ {
-			expected = append(expected, i)
-		}
+	for i := range tasks * countPerTask {
+		expected = append(expected, i)
 	}
 	slices.Sort(data)
 
